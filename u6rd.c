@@ -63,6 +63,8 @@ struct ipv6_header {
 };
 
 static void usage(void);
+static int read_prefix(struct in6_addr *prefix, int *prefixlen,
+    char *prefixstr);
 static int open_tun(const char *devstr);
 static int open_raw(const char *relaystr, struct sockaddr_in *relay);
 static int loop(int fd_tun, int fd_raw,
@@ -81,11 +83,11 @@ static void dump(const char *ptr, size_t len);
 int
 main(int argc, char *argv[])
 {
-	char *devstr, *prefixstr, *relaystr, *localstr, *p;
+	char *devstr, *prefixstr, *relaystr, *localstr;
 	struct in6_addr prefix;
 	struct sockaddr_in relay;
 	int prefixlen, fd_tun, fd_raw;
-	int c, ret;
+	int c;
 
 	setprogname(argv[0]);
 
@@ -106,26 +108,8 @@ main(int argc, char *argv[])
 	relaystr = argv[2];
 	localstr = argv[3];
 
-	if ((p = strchr(prefixstr, '/')) == NULL)
-		usage();
-	else {
-		*p++ = '\0';
-		ret = inet_pton(AF_INET6, prefixstr, &prefix);
-		if (ret == -1) {
-			fprintf(stderr, "%s: %s\n",
-			    prefixstr, strerror(errno));
-			exit(1);
-		} else if (ret != 1) {
-			fprintf(stderr, "%s: failed to parse\n", prefixstr);
-			exit(1);
-		}
-		prefixlen = atoi(p);		/* XXX overflow */
-		if (prefixlen <= 0 || prefixlen > 32 || prefixlen % 8 != 0) {
-			fprintf(stderr, "prefixlen other than 8, 16, 24, "
-			    "or 32 is not implemented\n");
-			exit(1);
-		}
-	}
+	if (read_prefix(&prefix, &prefixlen, prefixstr) == -1)
+		exit(1);
 
 	if ((fd_tun = open_tun(devstr)) == -1)
 		exit(1);
@@ -144,6 +128,39 @@ usage(void)
 	printf("usage: %s /dev/tunN prefix/prefixlen relay_v4_addr local_v4_addr\n",
 	    getprogname());
 	exit(1);
+}
+
+static int
+read_prefix(struct in6_addr *prefix, int *prefixlen, char *prefixstr)
+{
+	char *p;
+	int ret;
+
+	if ((p = strchr(prefixstr, '/')) == NULL) {
+		fprintf(stderr, "%s: prefixlen is not specified\n", prefixstr);
+		return -1;
+	}
+	*p++ = '\0';
+	ret = inet_pton(AF_INET6, prefixstr, prefix);
+	if (ret == -1) {
+		fprintf(stderr, "%s: %s\n", prefixstr, strerror(errno));
+		return -1;
+	} else if (ret != 1) {
+		fprintf(stderr, "%s: failed to parse\n", prefixstr);
+		return -1;
+	}
+	*prefixlen = atoi(p);		/* XXX overflow */
+	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
+	if (*prefixlen < 16 || *prefixlen > 32) {
+		fprintf(stderr, "prefixlen must be between 16 and 32\n");
+		return -1;
+	}
+	if (*prefixlen % 8 != 0) {
+		fprintf(stderr, "prefixlen that is not a multiple of 8 is "
+		    "not implemented\n");
+		return -1;
+	}
+	return 0;
 }
 
 static int
@@ -236,7 +253,7 @@ static void
 tun2raw(int fd_tun, int fd_raw,
     struct in6_addr *prefix, int prefixlenbyte, struct sockaddr_in *relay)
 {
-	char buf[4096];		/* XXX alignment */
+	char buf[2048];
 	struct sockaddr_in direct, *dst;
 	struct ipv6_header *ip6;
 	uint32_t family;
@@ -244,6 +261,10 @@ tun2raw(int fd_tun, int fd_raw,
 
 	if ((ret = read(fd_tun, buf, sizeof(buf))) == (size_t)-1) {
 		fprintf(stderr, "read from tun: %s\n", strerror(errno));
+		return;
+	}
+	if (ret == sizeof(buf)) {
+		fprintf(stderr, "tun2raw: packet too big");
 		return;
 	}
 
@@ -254,7 +275,7 @@ tun2raw(int fd_tun, int fd_raw,
 	 * We can encapsulate only IPv6 packets.
 	 */
 	if (ret < 4) {
-		fprintf(stderr, "read from tun: no family\n");
+		fprintf(stderr, "tun2raw: no address family\n");
 		return;
 	}
 	if ((family = load32(buf)) != AF_INET6) {
@@ -272,7 +293,7 @@ tun2raw(int fd_tun, int fd_raw,
 	 * packet to the router directly.
 	 */
 	if (ret - 4 < sizeof(*ip6)) {
-		fprintf(stderr, "tun2raw: too short IPv6 packet\n");
+		fprintf(stderr, "tun2raw: no IPv6 header (%zu)\n", ret);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + 4);
@@ -297,12 +318,16 @@ tun2raw(int fd_tun, int fd_raw,
 static void
 raw2tun(int fd_tun, int fd_raw)
 {
-	char buf[4096];		/* XXX alignment */
+	char buf[2048];
 	struct ipv4_header *ip4;
 	size_t skip, ret;
 
 	if ((ret = recv(fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
 		fprintf(stderr, "read from raw: %s\n", strerror(errno));
+		return;
+	}
+	if (ret == sizeof(buf)) {
+		fprintf(stderr, "raw2tun: packet too big");
 		return;
 	}
 
@@ -312,19 +337,19 @@ raw2tun(int fd_tun, int fd_raw)
 	/* XXX check ipv4? */
 
 	if (ret < sizeof(*ip4)) {
-		fprintf(stderr, "raw2tun: too short (%zu)\n", ret);
+		fprintf(stderr, "raw2tun: no IPv4 header (%zu)\n", ret);
 		return;
 	}
 	ip4 = (struct ipv4_header *)buf;
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
 		fprintf(stderr,
-		    "raw2tun: broken IPv4 header length (%zu)\n", skip);
+		    "raw2tun: IPv4 header too short (%zu)\n", skip);
 		return;
 	}
 	if (ret < skip) {
 		fprintf(stderr,
-		    "raw2tun: shorter than the header (%zu)\n", ret);
+		    "raw2tun: IPv4 header too long (%zu < %zu)\n", ret, skip);
 		return;
 	}
 
