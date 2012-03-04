@@ -40,6 +40,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#define LERR(...)	do {						\
+		fprintf(stderr, __VA_ARGS__);				\
+	} while (0 /* CONSTCOND */)
+#define LDEBUG(...)	do {						\
+		if (options.debug > 0)					\
+			fprintf(stderr, __VA_ARGS__);			\
+	} while (0 /* CONSTCOND */)
+
 struct ipv4_header {
 	uint8_t ver_hlen;
 	uint8_t tos;
@@ -62,6 +70,10 @@ struct ipv6_header {
 	uint8_t dst[16];
 };
 
+struct options {
+	int debug;
+};
+
 static void usage(void);
 static int read_prefix(struct in6_addr *prefix, int *prefixlen,
     char *prefixstr);
@@ -80,6 +92,8 @@ void store32(char *buf, uint32_t val);
 
 static void dump(const char *ptr, size_t len);
 
+struct options options;
+
 int
 main(int argc, char *argv[])
 {
@@ -94,6 +108,7 @@ main(int argc, char *argv[])
 	while ((c = getopt(argc, argv, "d")) != -1) {
 		switch (c) {
 		case 'd':
+			options.debug++;
 			break;
 		default:
 			usage();
@@ -125,7 +140,7 @@ main(int argc, char *argv[])
 static void
 usage(void)
 {
-	printf("usage: %s /dev/tunN prefix/prefixlen relay_v4_addr local_v4_addr\n",
+	printf("usage: %s [-d] /dev/tunN prefix/prefixlen relay_v4_addr local_v4_addr\n",
 	    getprogname());
 	exit(1);
 }
@@ -137,26 +152,26 @@ read_prefix(struct in6_addr *prefix, int *prefixlen, char *prefixstr)
 	int ret;
 
 	if ((p = strchr(prefixstr, '/')) == NULL) {
-		fprintf(stderr, "%s: prefixlen is not specified\n", prefixstr);
+		LERR("%s: prefixlen is not specified\n", prefixstr);
 		return -1;
 	}
 	*p++ = '\0';
 	ret = inet_pton(AF_INET6, prefixstr, prefix);
 	if (ret == -1) {
-		fprintf(stderr, "%s: %s\n", prefixstr, strerror(errno));
+		LERR("%s: %s\n", prefixstr, strerror(errno));
 		return -1;
 	} else if (ret != 1) {
-		fprintf(stderr, "%s: failed to parse\n", prefixstr);
+		LERR("%s: failed to parse\n", prefixstr);
 		return -1;
 	}
 	*prefixlen = atoi(p);		/* XXX overflow */
 	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
 	if (*prefixlen < 16 || *prefixlen > 32) {
-		fprintf(stderr, "prefixlen must be between 16 and 32\n");
+		LERR("prefixlen must be between 16 and 32\n");
 		return -1;
 	}
 	if (*prefixlen % 8 != 0) {
-		fprintf(stderr, "prefixlen that is not a multiple of 8 is "
+		LERR("prefixlen that is not a multiple of 8 is "
 		    "not implemented\n");
 		return -1;
 	}
@@ -171,7 +186,7 @@ open_tun(const char *devstr)
 	on = 1;
 
 	if ((fd = open(devstr, O_RDWR, 0)) == -1) {
-		fprintf(stderr, "open: %s: %s\n", devstr, strerror(errno));
+		LERR("open: %s: %s\n", devstr, strerror(errno));
 		return -1;
 	}
 	/*
@@ -180,8 +195,7 @@ open_tun(const char *devstr)
 	 * packet.
 	 */
 	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
-		fprintf(stderr, "ioctl(TUNSIFHEAD): %s: %s\n",
-		    devstr, strerror(errno));
+		LERR("ioctl(TUNSIFHEAD): %s: %s\n", devstr, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -201,12 +215,11 @@ open_raw(const char *relaystr, struct sockaddr_in *relay)
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
         gairet = getaddrinfo(relaystr, NULL, &hints, &res0);
 	if (gairet != 0) {
-		fprintf(stderr, "getaddrinfo: %s: %s\n",
-		    relaystr, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s\n", relaystr, gai_strerror(gairet));
 		return -1;
 	}
 	if (sizeof(*relay) != res0->ai_addrlen) {
-		fprintf(stderr, "length of sockaddr_in mismatch\n");
+		LERR("length of sockaddr_in mismatch\n");
 		freeaddrinfo(res0);
 		return -1;
 	}
@@ -214,7 +227,7 @@ open_raw(const char *relaystr, struct sockaddr_in *relay)
 	freeaddrinfo(res0);
 
 	if ((fd = socket(PF_INET, SOCK_RAW, IPPROTO_IPV6)) == -1) {
-		fprintf(stderr, "socket: %s\n", strerror(errno));
+		LERR("socket: %s\n", strerror(errno));
 		return -1;
 	}
 
@@ -237,7 +250,7 @@ loop(int fd_tun, int fd_raw,
 		rfds = rfds0;
 		ret = select(maxfd + 1, &rfds, NULL, NULL, NULL);
 		if (ret == -1) {
-			fprintf(stderr, "select: %s\n", strerror(errno));
+			LERR("select: %s\n", strerror(errno));
 			return -1;
 		}
 		if (FD_ISSET(fd_tun, &rfds))
@@ -260,26 +273,28 @@ tun2raw(int fd_tun, int fd_raw,
 	size_t ret;
 
 	if ((ret = read(fd_tun, buf, sizeof(buf))) == (size_t)-1) {
-		fprintf(stderr, "read from tun: %s\n", strerror(errno));
+		LERR("read from tun: %s\n", strerror(errno));
 		return;
 	}
 	if (ret == sizeof(buf)) {
-		fprintf(stderr, "tun2raw: packet too big");
+		LDEBUG("tun2raw: packet too big");
 		return;
 	}
 
-	fprintf(stderr, "tun2raw:\n");
-	dump(buf, ret);
+	if (options.debug > 1) {
+		fprintf(stderr, "tun2raw:\n");
+		dump(buf, ret);
+	}
 
 	/*
 	 * We can encapsulate only IPv6 packets.
 	 */
 	if (ret < 4) {
-		fprintf(stderr, "tun2raw: no address family\n");
+		LDEBUG("tun2raw: no address family\n");
 		return;
 	}
 	if ((family = load32(buf)) != AF_INET6) {
-		fprintf(stderr, "tun2raw: non-IPv6 packet (%lu)\n",
+		LDEBUG("tun2raw: non-IPv6 packet (%lu)\n",
 		    (unsigned long)family);
 		return;
 	}
@@ -293,7 +308,7 @@ tun2raw(int fd_tun, int fd_raw,
 	 * packet to the router directly.
 	 */
 	if (ret - 4 < sizeof(*ip6)) {
-		fprintf(stderr, "tun2raw: no IPv6 header (%zu)\n", ret);
+		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + 4);
@@ -309,10 +324,10 @@ tun2raw(int fd_tun, int fd_raw,
 
 	if ((ret = sendto(fd_raw, buf + 4, ret - 4, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
-		fprintf(stderr, "write to raw: %s\n", strerror(errno));
+		LERR("write to raw: %s\n", strerror(errno));
 		return;
 	}
-	fprintf(stderr, "%zu bytes written to raw\n", ret);
+	LDEBUG("%zu bytes written to raw\n", ret);
 }
 
 static void
@@ -323,33 +338,34 @@ raw2tun(int fd_tun, int fd_raw)
 	size_t skip, ret;
 
 	if ((ret = recv(fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
-		fprintf(stderr, "read from raw: %s\n", strerror(errno));
+		LERR("read from raw: %s\n", strerror(errno));
 		return;
 	}
 	if (ret == sizeof(buf)) {
-		fprintf(stderr, "raw2tun: packet too big");
+		LDEBUG("raw2tun: packet too big");
 		return;
 	}
 
-	fprintf(stderr, "raw2tun:\n");
-	dump(buf, ret);
+	if (options.debug > 1) {
+		fprintf(stderr, "raw2tun:\n");
+		dump(buf, ret);
+	}
 
 	/* XXX check ipv4? */
 
 	if (ret < sizeof(*ip4)) {
-		fprintf(stderr, "raw2tun: no IPv4 header (%zu)\n", ret);
+		LDEBUG("raw2tun: no IPv4 header (%zu)\n", ret);
 		return;
 	}
 	ip4 = (struct ipv4_header *)buf;
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
-		fprintf(stderr,
-		    "raw2tun: IPv4 header too short (%zu)\n", skip);
+		LDEBUG("raw2tun: IPv4 header too short (%zu)\n", skip);
 		return;
 	}
 	if (ret < skip) {
-		fprintf(stderr,
-		    "raw2tun: IPv4 header too long (%zu < %zu)\n", ret, skip);
+		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)\n",
+		    ret, skip);
 		return;
 	}
 
@@ -365,10 +381,10 @@ raw2tun(int fd_tun, int fd_raw)
 	store32(buf + skip, AF_INET6);
 
 	if ((ret = write(fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
-		fprintf(stderr, "write to tun: %s\n", strerror(errno));
+		LERR("write to tun: %s\n", strerror(errno));
 		return;
 	}
-	fprintf(stderr, "%zu bytes written to tun\n", ret);
+	LDEBUG("%zu bytes written to tun\n", ret);
 }
 
 
@@ -435,7 +451,7 @@ dump(const char *ptr, size_t len)
 		}
 		bufprint[i] = '\0';
 
-		printf("%p %s  %s\n", p, bufhex, bufprint);
+		fprintf(stderr, "%p %s  %s\n", p, bufhex, bufprint);
 		p += thislen;
 		len -= thislen;
 	}
