@@ -70,20 +70,28 @@ struct ipv6_header {
 	uint8_t dst[16];
 };
 
+struct connection {
+	struct in6_addr prefix;
+	int prefixlenbyte;
+	struct in_addr myv4;
+	struct sockaddr_in relay;
+	int fd_tun;
+	int fd_raw;
+};
+
 struct options {
 	int debug;
 };
 
 static void usage(void);
-static int read_prefix(struct in6_addr *prefix, int *prefixlen,
+static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     char *prefixstr);
+static int parse_myv4(struct in_addr *myv4, const char *myv4str);
 static int open_tun(const char *devstr);
-static int open_raw(const char *relaystr, struct sockaddr_in *relay);
-static int loop(int fd_tun, int fd_raw,
-    struct in6_addr *prefix, int prefixlenbyte, struct sockaddr_in *relay);
-static void tun2raw(int fd_tun, int fd_raw,
-    struct in6_addr *prefix, int prefixlenbyte, struct sockaddr_in *relay);
-static void raw2tun(int fd_tun, int fd_raw);
+static int open_raw(struct sockaddr_in *relay, const char *relaystr);
+static int loop(struct connection *c);
+static void tun2raw(struct connection *c);
+static void raw2tun(struct connection *c);
 
 uint16_t load16(const char *buf);
 uint32_t load32(const char *buf);
@@ -97,10 +105,8 @@ struct options options;
 int
 main(int argc, char *argv[])
 {
-	char *devstr, *prefixstr, *relaystr, *localstr;
-	struct in6_addr prefix;
-	struct sockaddr_in relay;
-	int prefixlen, fd_tun, fd_raw;
+	struct connection con;
+	char *devstr, *prefixstr, *relaystr, *myv4str;
 	int c;
 
 	setprogname(argv[0]);
@@ -121,17 +127,19 @@ main(int argc, char *argv[])
 	devstr = argv[0];
 	prefixstr = argv[1];
 	relaystr = argv[2];
-	localstr = argv[3];
+	myv4str = argv[3];
 
-	if (read_prefix(&prefix, &prefixlen, prefixstr) == -1)
+	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixstr) == -1)
+		exit(1);
+	if (parse_myv4(&con.myv4, myv4str) == -1)
 		exit(1);
 
-	if ((fd_tun = open_tun(devstr)) == -1)
+	if ((con.fd_tun = open_tun(devstr)) == -1)
 		exit(1);
-	if ((fd_raw = open_raw(relaystr, &relay)) == 1)
+	if ((con.fd_raw = open_raw(&con.relay, relaystr)) == 1)
 		exit(1);
 
-	if (loop(fd_tun, fd_raw, &prefix, prefixlen / 8, &relay) == -1)
+	if (loop(&con) == -1)
 		exit(1);
 
 	exit(0);
@@ -140,16 +148,16 @@ main(int argc, char *argv[])
 static void
 usage(void)
 {
-	printf("usage: %s [-d] /dev/tunN prefix/prefixlen relay_v4_addr local_v4_addr\n",
+	printf("usage: %s [-d] /dev/tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
 	exit(1);
 }
 
 static int
-read_prefix(struct in6_addr *prefix, int *prefixlen, char *prefixstr)
+parse_prefix(struct in6_addr *prefix, int *prefixlenbyte, char *prefixstr)
 {
 	char *p;
-	int ret;
+	int prefixlen, ret;
 
 	if ((p = strchr(prefixstr, '/')) == NULL) {
 		LERR("%s: prefixlen is not specified\n", prefixstr);
@@ -164,15 +172,32 @@ read_prefix(struct in6_addr *prefix, int *prefixlen, char *prefixstr)
 		LERR("%s: failed to parse\n", prefixstr);
 		return -1;
 	}
-	*prefixlen = atoi(p);		/* XXX overflow */
+	prefixlen = atoi(p);		/* XXX overflow */
 	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
-	if (*prefixlen < 16 || *prefixlen > 32) {
+	if (prefixlen < 16 || prefixlen > 32) {
 		LERR("prefixlen must be between 16 and 32\n");
 		return -1;
 	}
-	if (*prefixlen % 8 != 0) {
+	if (prefixlen % 8 != 0) {
 		LERR("prefixlen that is not a multiple of 8 is "
 		    "not implemented\n");
+		return -1;
+	}
+	*prefixlenbyte = prefixlen / 8;
+	return 0;
+}
+
+static int
+parse_myv4(struct in_addr *myv4, const char *myv4str)
+{
+	int ret;
+
+	ret = inet_pton(AF_INET, myv4str, myv4);
+	if (ret == -1) {
+		LERR("%s: %s\n", myv4str, strerror(errno));
+		return -1;
+	} else if (ret != 1) {
+		LERR("%s: failed to parse\n", myv4str);
 		return -1;
 	}
 	return 0;
@@ -203,7 +228,7 @@ open_tun(const char *devstr)
 }
 
 static int
-open_raw(const char *relaystr, struct sockaddr_in *relay)
+open_raw(struct sockaddr_in *relay, const char *relaystr)
 {
 	struct addrinfo hints, *res0;
 	int fd, gairet;
@@ -235,16 +260,15 @@ open_raw(const char *relaystr, struct sockaddr_in *relay)
 }
 
 static int
-loop(int fd_tun, int fd_raw,
-    struct in6_addr *prefix, int prefixlenbyte, struct sockaddr_in *relay)
+loop(struct connection *c)
 {
 	fd_set rfds, rfds0;
 	int maxfd, ret;
 
 	FD_ZERO(&rfds0);
-	FD_SET(fd_tun, &rfds0);
-	FD_SET(fd_raw, &rfds0);
-	maxfd = fd_tun > fd_raw ? fd_tun : fd_raw;
+	FD_SET(c->fd_tun, &rfds0);
+	FD_SET(c->fd_raw, &rfds0);
+	maxfd = c->fd_tun > c->fd_raw ? c->fd_tun : c->fd_raw;
 
 	for (;;) {
 		rfds = rfds0;
@@ -253,26 +277,25 @@ loop(int fd_tun, int fd_raw,
 			LERR("select: %s\n", strerror(errno));
 			return -1;
 		}
-		if (FD_ISSET(fd_tun, &rfds))
-			tun2raw(fd_tun, fd_raw, prefix, prefixlenbyte, relay);
-		if (FD_ISSET(fd_raw, &rfds))
-			raw2tun(fd_tun, fd_raw);
+		if (FD_ISSET(c->fd_tun, &rfds))
+			tun2raw(c);
+		if (FD_ISSET(c->fd_raw, &rfds))
+			raw2tun(c);
 	}
 	/* NOTREACHED */
 	return 0;
 }
 
 static void
-tun2raw(int fd_tun, int fd_raw,
-    struct in6_addr *prefix, int prefixlenbyte, struct sockaddr_in *relay)
+tun2raw(struct connection *c)
 {
 	char buf[2048];
 	struct sockaddr_in direct, *dst;
 	struct ipv6_header *ip6;
-	uint32_t family;
+	unsigned long family;
 	size_t ret;
 
-	if ((ret = read(fd_tun, buf, sizeof(buf))) == (size_t)-1) {
+	if ((ret = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
 		LERR("read from tun: %s\n", strerror(errno));
 		return;
 	}
@@ -294,35 +317,45 @@ tun2raw(int fd_tun, int fd_raw,
 		return;
 	}
 	if ((family = load32(buf)) != AF_INET6) {
-		LDEBUG("tun2raw: non-IPv6 packet (%lu)\n",
-		    (unsigned long)family);
+		LDEBUG("tun2raw: non-IPv6 packet (%lu)\n", family);
 		return;
 	}
-	/* XXX and inspect the version in the packet? */
 
-	/* XXX check addresses; src is mine? */
-
-	/*
-	 * Check the IPv6 destination.
-	 * If the destination is within the prefix, send an encapsulated
-	 * packet to the router directly.
-	 */
 	if (ret - 4 < sizeof(*ip6)) {
-		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret);
+		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret - 4);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + 4);
-	if (memcmp(prefix, ip6->dst, prefixlenbyte) == 0) {
+
+	/*
+	 * Check if the embedded address in the source IPv6 packet matches
+	 * with my IPv4 address.  If not, the response will not reach me.
+	 */
+	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0) {
+		LDEBUG("tun2raw: src is outside of the prefix\n");
+		return;
+	}
+	if (memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
+		LDEBUG("tun2raw: src does not match with my IPv4 address\n");
+		return;
+	}
+
+	/* XXX dest is global? */
+
+	/*
+	 * Check the IPv6 destination.  If the destination is within
+	 * the prefix, send an encapsulated packet to the corresponding
+	 * router directly.  Otherwise, send it to the relay router.
+	 */
+	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
 		/* get peer's IPv4 address */
-		direct = *relay;
-		memcpy(&direct.sin_addr, &ip6->dst[prefixlenbyte], 4);
+		direct = c->relay;
+		memcpy(&direct.sin_addr, ip6->dst + c->prefixlenbyte, 4);
 		dst = &direct;
 	} else
-		dst = relay;
+		dst = &c->relay;
 
-	/* XXX what to do if the size is larger than MTU? */
-
-	if ((ret = sendto(fd_raw, buf + 4, ret - 4, 0,
+	if ((ret = sendto(c->fd_raw, buf + 4, ret - 4, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
 		LERR("write to raw: %s\n", strerror(errno));
 		return;
@@ -331,13 +364,14 @@ tun2raw(int fd_tun, int fd_raw,
 }
 
 static void
-raw2tun(int fd_tun, int fd_raw)
+raw2tun(struct connection *c)
 {
 	char buf[2048];
 	struct ipv4_header *ip4;
+	struct ipv6_header *ip6;
 	size_t skip, ret;
 
-	if ((ret = recv(fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
+	if ((ret = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
 		LERR("read from raw: %s\n", strerror(errno));
 		return;
 	}
@@ -351,13 +385,15 @@ raw2tun(int fd_tun, int fd_raw)
 		dump(buf, ret);
 	}
 
-	/* XXX check ipv4? */
-
 	if (ret < sizeof(*ip4)) {
 		LDEBUG("raw2tun: no IPv4 header (%zu)\n", ret);
 		return;
 	}
 	ip4 = (struct ipv4_header *)buf;
+
+	/*
+	 * Check the IPv4 header length.
+	 */
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
 		LDEBUG("raw2tun: IPv4 header too short (%zu)\n", skip);
@@ -369,9 +405,39 @@ raw2tun(int fd_tun, int fd_raw)
 		return;
 	}
 
-	/* XXX check if IPv6 */
-	/* XXX check addresses; ip4 ip6 match?
-	   dest is mine? */
+	if (ret - skip < sizeof(*ip6)) {
+		LDEBUG("raw2tun: no IPv6 header (%zu)\n", ret - skip);
+		return;
+	}
+	ip6 = (struct ipv6_header *)(buf + skip);
+
+	/*
+	 * If the IPv6 source address is within the prefix, the embedded IPv4
+	 * address should match with the outer one.  If not in the prefix,
+	 * it should come from the relay router.
+	 */
+	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) == 0) {
+		if (memcmp(ip4->src, ip6->src + c->prefixlenbyte, 4) != 0) {
+			LDEBUG("raw2tun: embedded and outer IPv4 address "
+			    "mismatch\n");
+			return;
+		}
+	} else {
+		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
+			LDEBUG("raw2tun: native address must come from "
+			    "relay\n");
+			return;
+		}
+	}
+
+	/*
+	 * The IPv6 destination address should match with mine.
+	 */
+	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) != 0 ||
+	    memcmp(&c->myv4, ip6->dst + c->prefixlenbyte, 4) != 0) {
+		LDEBUG("raw2tun: destination is not me\n");
+		return;
+	}
 
 	/*
 	 * Prepend protocol family information for TUNSIFHEAD.
@@ -380,7 +446,7 @@ raw2tun(int fd_tun, int fd_raw)
 	skip -= 4;
 	store32(buf + skip, AF_INET6);
 
-	if ((ret = write(fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
+	if ((ret = write(c->fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
 		LERR("write to tun: %s\n", strerror(errno));
 		return;
 	}
