@@ -92,6 +92,8 @@ static int open_raw(struct sockaddr_in *relay, const char *relaystr);
 static int loop(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
+static int reject_v4(const uint8_t *addr4);
+static int reject_v6(const uint8_t *addr6);
 
 uint16_t load16(const char *buf);
 uint32_t load32(const char *buf);
@@ -331,16 +333,11 @@ tun2raw(struct connection *c)
 	 * Check if the embedded address in the source IPv6 packet matches
 	 * with my IPv4 address.  If not, the response will not reach me.
 	 */
-	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0) {
-		LDEBUG("tun2raw: src is outside of the prefix\n");
+	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0 ||
+	    memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
+		LDEBUG("tun2raw: source is not me\n");
 		return;
 	}
-	if (memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("tun2raw: src does not match with my IPv4 address\n");
-		return;
-	}
-
-	/* XXX dest is global? */
 
 	/*
 	 * Check the IPv6 destination.  If the destination is within
@@ -348,12 +345,22 @@ tun2raw(struct connection *c)
 	 * router directly.  Otherwise, send it to the relay router.
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
-		/* get peer's IPv4 address */
+		if (reject_v4(ip6->dst + c->prefixlenbyte)) {
+			LDEBUG("tun2raw: reject IPv4 destination\n");
+			return;
+		}
+		/* Send to the direct peer. */
 		direct = c->relay;
 		memcpy(&direct.sin_addr, ip6->dst + c->prefixlenbyte, 4);
 		dst = &direct;
-	} else
+	} else {
+		if (reject_v6(ip6->dst)) {
+			LDEBUG("tun2raw: reject IPv6 destination\n");
+			return;
+		}
+		/* Send to the relay. */
 		dst = &c->relay;
+	}
 
 	if ((ret = sendto(c->fd_raw, buf + 4, ret - 4, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
@@ -392,7 +399,7 @@ raw2tun(struct connection *c)
 	ip4 = (struct ipv4_header *)buf;
 
 	/*
-	 * Check the IPv4 header length.
+	 * Check the IPv4 header length.  Usually 20.
 	 */
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
@@ -422,10 +429,18 @@ raw2tun(struct connection *c)
 			    "mismatch\n");
 			return;
 		}
+		if (reject_v4(ip6->src + c->prefixlenbyte)) {
+			LDEBUG("raw2tun: reject IPv4 source\n");
+			return;
+		}
 	} else {
 		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
 			LDEBUG("raw2tun: native address must come from "
 			    "relay\n");
+			return;
+		}
+		if (reject_v6(ip6->src)) {
+			LDEBUG("raw2tun: reject IPv6 source\n");
 			return;
 		}
 	}
@@ -451,6 +466,48 @@ raw2tun(struct connection *c)
 		return;
 	}
 	LDEBUG("%zu bytes written to tun\n", ret);
+}
+
+/*
+ * Reject other than global unicast IPv4 addresses [RFC3056 9].
+ */
+static int
+reject_v4(const uint8_t *addr4)
+{
+	uint32_t a;
+
+	a = load32((const char *)addr4);
+
+	if (addr4[0] == 0 || addr4[0] == 127)
+		return 1;		/* self-identification, loopback */
+	if ((a & 0xf0000000) == 0xe0000000)
+		return 1;		/* multicast */
+	if ((a & 0xff000000) == 0x0a000000 ||
+	    (a & 0xfff00000) == 0xac100000 ||
+	    (a & 0xffff0000) == 0xc0a80000)
+		return 1;		/* private */
+	if ((a & 0xffff0000) == 0xa9fe0000)
+		return 1;		/* link-local */
+	if (a == 0xffffffff)
+		return 1;		/* limited broadcast */
+	return 0;
+}
+
+/*
+ * Reject non-global IPv6 addresses.  Multicast should be accepted.
+ */
+static int
+reject_v6(const uint8_t *addr6)
+{
+	if (addr6[0] == 0)
+		return 1;		/* compat, mapped, loopback, etc */
+	if (addr6[0] == 0xff && (addr6[1] & 0x0f) != 0x0e)
+		return 1;		/* multicast non-global */
+	if (addr6[0] == 0xfe && (addr6[1] & 0xc0) == 0x80)
+		return 1;		/* link-local unicast */
+	if (addr6[0] == 0xfe && (addr6[1] & 0xc0) == 0xc0)
+		return 1;		/* site-local unicast */
+	return 0;
 }
 
 
