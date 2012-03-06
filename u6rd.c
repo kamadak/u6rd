@@ -94,6 +94,8 @@ static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
 static int reject_v4(const uint8_t *addr4);
 static int reject_v6(const uint8_t *addr6);
+static const char *addr42str(const uint8_t *addr4);
+static const char *addr62str(const uint8_t *addr6);
 
 uint16_t load16(const char *buf);
 uint32_t load32(const char *buf);
@@ -335,7 +337,8 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("tun2raw: source is not me\n");
+		LDEBUG("tun2raw: source is not me (%s)\n",
+		    addr62str(ip6->src));
 		return;
 	}
 
@@ -346,7 +349,8 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
 		if (reject_v4(ip6->dst + c->prefixlenbyte)) {
-			LDEBUG("tun2raw: reject IPv4 destination\n");
+			LDEBUG("tun2raw: reject IPv4 destination (%s)\n",
+			    addr42str(ip6->dst + c->prefixlenbyte));
 			return;
 		}
 		/* Send to the direct peer. */
@@ -355,7 +359,8 @@ tun2raw(struct connection *c)
 		dst = &direct;
 	} else {
 		if (reject_v6(ip6->dst)) {
-			LDEBUG("tun2raw: reject IPv6 destination\n");
+			LDEBUG("tun2raw: reject IPv6 destination (%s)\n",
+			    addr62str(ip6->dst));
 			return;
 		}
 		/* Send to the relay. */
@@ -426,21 +431,26 @@ raw2tun(struct connection *c)
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) == 0) {
 		if (memcmp(ip4->src, ip6->src + c->prefixlenbyte, 4) != 0) {
 			LDEBUG("raw2tun: embedded and outer IPv4 address "
-			    "mismatch\n");
+			    "mismatch (%s, %s)\n",
+			    addr62str(ip6->src), addr42str(ip4->src));
 			return;
 		}
 		if (reject_v4(ip6->src + c->prefixlenbyte)) {
-			LDEBUG("raw2tun: reject IPv4 source\n");
+			LDEBUG("raw2tun: reject IPv4 source (%s)\n",
+			    addr42str(ip6->src + c->prefixlenbyte));
 			return;
 		}
 	} else {
+		/* Not true for 6to4; non-RFC-3068-anycast relays exist. */
 		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
-			LDEBUG("raw2tun: native address must come from "
-			    "relay\n");
+			LDEBUG("raw2tun: native address from non-relaying "
+			    "router (%s, %s)\n",
+			    addr62str(ip6->src), addr42str(ip4->src));
 			return;
 		}
 		if (reject_v6(ip6->src)) {
-			LDEBUG("raw2tun: reject IPv6 source\n");
+			LDEBUG("raw2tun: reject IPv6 source (%s)\n",
+			    addr62str(ip6->src));
 			return;
 		}
 	}
@@ -450,7 +460,8 @@ raw2tun(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->dst + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("raw2tun: destination is not me\n");
+		LDEBUG("raw2tun: destination is not me (%s)\n",
+		    addr62str(ip6->dst));
 		return;
 	}
 
@@ -508,6 +519,28 @@ reject_v6(const uint8_t *addr6)
 	if (addr6[0] == 0xfe && (addr6[1] & 0xc0) == 0xc0)
 		return 1;		/* site-local unicast */
 	return 0;
+}
+
+static const char *
+addr42str(const uint8_t *addr4)
+{
+	static char buf[INET_ADDRSTRLEN];
+
+	if (inet_ntop(AF_INET, addr4, buf, sizeof(buf)) != NULL)
+		return buf;
+	else
+		return "(error)";
+}
+
+static const char *
+addr62str(const uint8_t *addr6)
+{
+	static char buf[INET6_ADDRSTRLEN];
+
+	if (inet_ntop(AF_INET6, addr6, buf, sizeof(buf)) != NULL)
+		return buf;
+	else
+		return "(error)";
 }
 
 
