@@ -142,7 +142,7 @@ main(int argc, char *argv[])
 
 	if ((con.fd_tun = open_tun(devstr)) == -1)
 		exit(1);
-	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == 1)
+	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == -1)
 		exit(1);
 
 	if (loop(&con) == -1)
