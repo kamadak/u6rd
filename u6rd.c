@@ -86,9 +86,9 @@ struct options {
 static void usage(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     char *prefixstr);
-static int parse_myv4(struct in_addr *myv4, const char *myv4str);
+static int parse_relay(struct sockaddr_in *relay, const char *relaystr);
 static int open_tun(const char *devstr);
-static int open_raw(struct sockaddr_in *relay, const char *relaystr);
+static int open_raw(struct in_addr *myv4, const char *myv4str);
 static int loop(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
@@ -135,12 +135,12 @@ main(int argc, char *argv[])
 
 	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixstr) == -1)
 		exit(1);
-	if (parse_myv4(&con.myv4, myv4str) == -1)
+	if (parse_relay(&con.relay, relaystr) == -1)
 		exit(1);
 
 	if ((con.fd_tun = open_tun(devstr)) == -1)
 		exit(1);
-	if ((con.fd_raw = open_raw(&con.relay, relaystr)) == 1)
+	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == 1)
 		exit(1);
 
 	if (loop(&con) == -1)
@@ -192,18 +192,28 @@ parse_prefix(struct in6_addr *prefix, int *prefixlenbyte, char *prefixstr)
 }
 
 static int
-parse_myv4(struct in_addr *myv4, const char *myv4str)
+parse_relay(struct sockaddr_in *relay, const char *relaystr)
 {
-	int ret;
+	struct addrinfo hints, *res0;
+	int gairet;
 
-	ret = inet_pton(AF_INET, myv4str, myv4);
-	if (ret == -1) {
-		LERR("%s: %s\n", myv4str, strerror(errno));
-		return -1;
-	} else if (ret != 1) {
-		LERR("%s: failed to parse\n", myv4str);
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_RAW;
+	hints.ai_protocol = IPPROTO_IPV6;
+	hints.ai_flags = AI_NUMERICHOST;
+	gairet = getaddrinfo(relaystr, NULL, &hints, &res0);
+	if (gairet != 0) {
+		LERR("getaddrinfo: %s: %s\n", relaystr, gai_strerror(gairet));
 		return -1;
 	}
+	if (sizeof(*relay) != res0->ai_addrlen) {
+		LERR("length of sockaddr_in mismatch\n");
+		freeaddrinfo(res0);
+		return -1;
+	}
+	*relay = *(struct sockaddr_in *)res0->ai_addr;
+	freeaddrinfo(res0);
 	return 0;
 }
 
@@ -232,7 +242,7 @@ open_tun(const char *devstr)
 }
 
 static int
-open_raw(struct sockaddr_in *relay, const char *relaystr)
+open_raw(struct in_addr *myv4, const char *myv4str)
 {
 	struct addrinfo hints, *res0;
 	int fd, gairet;
@@ -242,24 +252,31 @@ open_raw(struct sockaddr_in *relay, const char *relaystr)
 	hints.ai_socktype = SOCK_RAW;
 	hints.ai_protocol = IPPROTO_IPV6;
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-        gairet = getaddrinfo(relaystr, NULL, &hints, &res0);
+	gairet = getaddrinfo(myv4str, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s\n", relaystr, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s\n", myv4str, gai_strerror(gairet));
 		return -1;
 	}
-	if (sizeof(*relay) != res0->ai_addrlen) {
-		LERR("length of sockaddr_in mismatch\n");
+	if (res0->ai_family != AF_INET) {
+		LERR("address family mismatch\n");
 		freeaddrinfo(res0);
 		return -1;
 	}
-	memcpy(relay, res0->ai_addr, sizeof(*relay));
-	freeaddrinfo(res0);
+	*myv4 = ((struct sockaddr_in *)res0->ai_addr)->sin_addr;
 
 	if ((fd = socket(PF_INET, SOCK_RAW, IPPROTO_IPV6)) == -1) {
 		LERR("socket: %s\n", strerror(errno));
+		freeaddrinfo(res0);
+		return -1;
+	}
+	if (bind(fd, res0->ai_addr, res0->ai_addrlen) == -1) {
+		LERR("bind: %s\n", strerror(errno));
+		freeaddrinfo(res0);
+		close(fd);
 		return -1;
 	}
 
+	freeaddrinfo(res0);
 	return fd;
 }
 
