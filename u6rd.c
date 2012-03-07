@@ -48,6 +48,8 @@
 			fprintf(stderr, __VA_ARGS__);			\
 	} while (0 /* CONSTCOND */)
 
+#define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
+
 struct ipv4_header {
 	uint8_t ver_hlen;
 	uint8_t tos;
@@ -333,7 +335,7 @@ tun2raw(struct connection *c)
 	/*
 	 * We can encapsulate only IPv6 packets.
 	 */
-	if (ret < 4) {
+	if (ret < TUN_HEAD_LEN) {
 		LDEBUG("tun2raw: no address family\n");
 		return;
 	}
@@ -342,11 +344,11 @@ tun2raw(struct connection *c)
 		return;
 	}
 
-	if (ret - 4 < sizeof(*ip6)) {
-		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret - 4);
+	if (ret - TUN_HEAD_LEN < sizeof(*ip6)) {
+		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret - TUN_HEAD_LEN);
 		return;
 	}
-	ip6 = (struct ipv6_header *)(buf + 4);
+	ip6 = (struct ipv6_header *)(buf + TUN_HEAD_LEN);
 
 	/*
 	 * Check if the embedded address in the source IPv6 packet matches
@@ -384,7 +386,7 @@ tun2raw(struct connection *c)
 		dst = &c->relay;
 	}
 
-	if ((ret = sendto(c->fd_raw, buf + 4, ret - 4, 0,
+	if ((ret = sendto(c->fd_raw, buf + TUN_HEAD_LEN, ret - TUN_HEAD_LEN, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
 		LERR("write to raw: %s\n", strerror(errno));
 		return;
@@ -486,7 +488,7 @@ raw2tun(struct connection *c)
 	 * Prepend protocol family information for TUNSIFHEAD.
 	 * Space is reused from the IPv4 header.
 	 */
-	skip -= 4;
+	skip -= TUN_HEAD_LEN;
 	store32(buf + skip, AF_INET6);
 
 	if ((ret = write(c->fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
