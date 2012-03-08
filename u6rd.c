@@ -87,7 +87,7 @@ struct options {
 static void usage(void);
 static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
-    char *prefixstr);
+    const char *prefixstr);
 static int parse_relay(struct sockaddr_in *relay, const char *relaystr);
 static int open_tun(const char *devstr);
 static int open_raw(struct in_addr *myv4, const char *myv4str);
@@ -211,24 +211,36 @@ version(void)
 }
 
 static int
-parse_prefix(struct in6_addr *prefix, int *prefixlenbyte, char *prefixstr)
+parse_prefix(struct in6_addr *prefix, int *prefixlenbyte,
+    const char *prefixstr)
 {
-	char *p;
+	char buf[INET6_ADDRSTRLEN + 3], *p;
 	int prefixlen, ret;
 
-	if ((p = strchr(prefixstr, '/')) == NULL) {
-		LERR("%s: prefixlen is not specified", prefixstr);
+	/*
+	 * Modifying strings pointed to by argv[n] (not limited to argv[0])
+	 * is allowed by C99, but it is not a good idea, because
+	 * modification is visible to ps(1) on NetBSD.
+	 */
+	if (strlcpy(buf, prefixstr, sizeof(buf)) >= sizeof(buf)) {
+		LERR("%s: prefix string too long", prefixstr);
+		return -1;
+	}
+
+	if ((p = strchr(buf, '/')) == NULL) {
+		LERR("%s: prefixlen is not specified", buf);
 		return -1;
 	}
 	*p++ = '\0';
-	ret = inet_pton(AF_INET6, prefixstr, prefix);
+	ret = inet_pton(AF_INET6, buf, prefix);
 	if (ret == -1) {
-		LERR("%s: %s", prefixstr, strerror(errno));
+		LERR("%s: %s", buf, strerror(errno));
 		return -1;
 	} else if (ret != 1) {
-		LERR("%s: failed to parse", prefixstr);
+		LERR("%s: failed to parse", buf);
 		return -1;
 	}
+
 	prefixlen = atoi(p);		/* XXX overflow */
 	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
 	if (prefixlen < 16 || prefixlen > 32) {
