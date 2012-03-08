@@ -34,7 +34,8 @@
 .\" ----------------------------------------------------------------
 .Sh SYNOPSIS
 .Nm
-.Op Fl d
+.Op Fl dFhV
+.Op Fl u Ar user
 .Ar /dev/tunN
 .Ar prefix Ns No / Ns Ar prefixlen
 .Ar relay_v4_addr
@@ -50,7 +51,19 @@ and the raw socket interface.
 The following options are available:
 .Bl -tag -width "-a 012"
 .It Fl d
-Output debug messages.
+Output debug messages to stderr.
+.It Fl F
+Run in the foreground.
+.Nm
+does not detach itself from the terminal and does not become a daemon.
+Log messages are output to the stderr in addition to syslog.
+No PID file is created.
+.It Fl h
+Show simple help messages and exit.
+.It Fl u Ar user
+Run with the privilege of the specified user instead of root.
+.It Fl V
+Show the version and exit.
 .El
 .Pp
 The argument
@@ -70,6 +83,12 @@ and modify the routing table by yourself.
 See
 .Sx EXAMPLES
 section.
+.Pp
+.Nm
+exits on
+.Dv SIGTERM
+or
+.Dv SIGINT .
 .\" ----------------------------------------------------------------
 .Sh EXAMPLES
 Example parameters in this section:
@@ -92,7 +111,7 @@ c633:6401 and cb00:7101 respectively.
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # ifconfig tun0 inet6 -nud
 # route add -inet6 default 2001:db8:c633:6401::1
-# u6rd /dev/tun0 2001:db8::/32 198.51.100.1 203.0.113.1
+# u6rd -u nobody /dev/tun0 2001:db8::/32 198.51.100.1 203.0.113.1
 .Ed
 .Pp
 Keep in mind that FreeBSD's tun driver will reset its address and go down
@@ -107,10 +126,16 @@ remember to reconfigure the address and re-up the interface.
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # sysctl -w net.inet6.tcp6.mss_ifmtu=1
 # route add -inet6 default 2001:db8:c633:6401::1
-# u6rd /dev/tun0 2001:db8::/32 198.51.100.1 203.0.113.1
+# u6rd -u nobody /dev/tun0 2001:db8::/32 198.51.100.1 203.0.113.1
 .Ed
 .Pp
 Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
+.\" ----------------------------------------------------------------
+.Sh FILES
+.Bl -tag -width "01234567" -compact
+.It Pa /var/run/u6rd.pid
+The PID file of the current instance of the daemon.
+.El
 .\" ----------------------------------------------------------------
 .Sh SEE ALSO
 .Xr tun 4 ,

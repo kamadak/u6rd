@@ -34,19 +34,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <unistd.h>
 
-#define LERR(...)	do {						\
-		fprintf(stderr, __VA_ARGS__);				\
-	} while (0 /* CONSTCOND */)
-#define LDEBUG(...)	do {						\
-		if (options.debug > 0)					\
-			fprintf(stderr, __VA_ARGS__);			\
-	} while (0 /* CONSTCOND */)
+#include "version.h"
+#include "util.h"
 
 #define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 
@@ -83,14 +80,20 @@ struct connection {
 
 struct options {
 	int debug;
+	int foreground;
+	const char *user;
 };
 
 static void usage(void);
+static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     char *prefixstr);
 static int parse_relay(struct sockaddr_in *relay, const char *relaystr);
 static int open_tun(const char *devstr);
 static int open_raw(struct in_addr *myv4, const char *myv4str);
+static int open_sigxfr(void);
+static void sighandler(int signo);
+static int set_nonblocking(int fd);
 static int loop(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
@@ -99,14 +102,13 @@ static int reject_v6(const uint8_t *addr6);
 static const char *addr42str(const uint8_t *addr4);
 static const char *addr62str(const uint8_t *addr6);
 
-uint16_t load16(const char *buf);
-uint32_t load32(const char *buf);
-void store16(char *buf, uint16_t val);
-void store32(char *buf, uint32_t val);
+static uint32_t load32(const char *buf);
+static void store32(char *buf, uint32_t val);
 
 static void dump(const char *ptr, size_t len);
 
-struct options options;
+static struct options options;
+static int sigxfr[2];
 
 int
 main(int argc, char *argv[])
@@ -117,13 +119,26 @@ main(int argc, char *argv[])
 
 	setprogname(argv[0]);
 
-	while ((c = getopt(argc, argv, "d")) != -1) {
+	while ((c = getopt(argc, argv, "dFhu:V")) != -1) {
 		switch (c) {
 		case 'd':
 			options.debug++;
 			break;
+		case 'F':
+			options.foreground = 1;
+			break;
+		case 'h':
+			usage();
+			/* NOTREACHED */
+		case 'u':
+			options.user = optarg;
+			break;
+		case 'V':
+			version();
+			/* NOTREACHED */
 		default:
 			usage();
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;
@@ -135,6 +150,10 @@ main(int argc, char *argv[])
 	relaystr = argv[2];
 	myv4str = argv[3];
 
+	openlog(NULL, LOG_PERROR, LOG_DAEMON);
+	if (options.debug == 0)
+		setlogmask(LOG_UPTO(LOG_INFO));
+
 	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixstr) == -1)
 		exit(1);
 	if (parse_relay(&con.relay, relaystr) == -1)
@@ -144,18 +163,50 @@ main(int argc, char *argv[])
 		exit(1);
 	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == -1)
 		exit(1);
-
-	if (loop(&con) == -1)
+	if (open_sigxfr() == -1)
 		exit(1);
 
+	if (!options.foreground && make_pidfile() == -1)
+		exit(1);
+	if (options.user != NULL && run_as(options.user) == -1) {
+		cleanup_pidfile();
+		exit(1);
+	}
+	if (!options.foreground) {
+		if (daemon(0, 0) == -1) {
+			LERR("daemon: %s", strerror(errno));
+			cleanup_pidfile();
+			exit(1);
+		}
+		openlog(NULL, 0, LOG_DAEMON);
+	}
+	if (!options.foreground && write_pidfile() == -1) {
+		cleanup_pidfile();
+		exit(1);
+	}
+
+	LNOTICE(PROGVERSION " started");
+	if (loop(&con) == -1) {
+		LNOTICE(PROGVERSION " aborting");
+		exit(1);
+	}
+	LNOTICE(PROGVERSION " exiting");
+	cleanup_pidfile();
 	exit(0);
 }
 
 static void
 usage(void)
 {
-	printf("usage: %s [-d] /dev/tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
+	printf("usage: %s [-dFhV] [-u user] /dev/tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
+	exit(1);
+}
+
+static void
+version(void)
+{
+	printf(PROGVERSION "\n");
 	exit(1);
 }
 
@@ -166,27 +217,27 @@ parse_prefix(struct in6_addr *prefix, int *prefixlenbyte, char *prefixstr)
 	int prefixlen, ret;
 
 	if ((p = strchr(prefixstr, '/')) == NULL) {
-		LERR("%s: prefixlen is not specified\n", prefixstr);
+		LERR("%s: prefixlen is not specified", prefixstr);
 		return -1;
 	}
 	*p++ = '\0';
 	ret = inet_pton(AF_INET6, prefixstr, prefix);
 	if (ret == -1) {
-		LERR("%s: %s\n", prefixstr, strerror(errno));
+		LERR("%s: %s", prefixstr, strerror(errno));
 		return -1;
 	} else if (ret != 1) {
-		LERR("%s: failed to parse\n", prefixstr);
+		LERR("%s: failed to parse", prefixstr);
 		return -1;
 	}
 	prefixlen = atoi(p);		/* XXX overflow */
 	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
 	if (prefixlen < 16 || prefixlen > 32) {
-		LERR("prefixlen must be between 16 and 32\n");
+		LERR("prefixlen must be between 16 and 32");
 		return -1;
 	}
 	if (prefixlen % 8 != 0) {
 		LERR("prefixlen that is not a multiple of 8 is "
-		    "not implemented\n");
+		    "not implemented");
 		return -1;
 	}
 	*prefixlenbyte = prefixlen / 8;
@@ -206,11 +257,11 @@ parse_relay(struct sockaddr_in *relay, const char *relaystr)
 	hints.ai_flags = AI_NUMERICHOST;
 	gairet = getaddrinfo(relaystr, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s\n", relaystr, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s", relaystr, gai_strerror(gairet));
 		return -1;
 	}
 	if (sizeof(*relay) != res0->ai_addrlen) {
-		LERR("length of sockaddr_in mismatch\n");
+		LERR("length of sockaddr_in mismatch");
 		freeaddrinfo(res0);
 		return -1;
 	}
@@ -227,7 +278,7 @@ open_tun(const char *devstr)
 	on = 1;
 
 	if ((fd = open(devstr, O_RDWR, 0)) == -1) {
-		LERR("open: %s: %s\n", devstr, strerror(errno));
+		LERR("open: %s: %s", devstr, strerror(errno));
 		return -1;
 	}
 	/*
@@ -236,7 +287,7 @@ open_tun(const char *devstr)
 	 * packet.
 	 */
 	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
-		LERR("ioctl(TUNSIFHEAD): %s: %s\n", devstr, strerror(errno));
+		LERR("ioctl(TUNSIFHEAD): %s: %s", devstr, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -256,23 +307,23 @@ open_raw(struct in_addr *myv4, const char *myv4str)
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
 	gairet = getaddrinfo(myv4str, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s\n", myv4str, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s", myv4str, gai_strerror(gairet));
 		return -1;
 	}
 	if (res0->ai_family != AF_INET) {
-		LERR("address family mismatch\n");
+		LERR("address family mismatch");
 		freeaddrinfo(res0);
 		return -1;
 	}
 	*myv4 = ((struct sockaddr_in *)res0->ai_addr)->sin_addr;
 
 	if ((fd = socket(PF_INET, SOCK_RAW, IPPROTO_IPV6)) == -1) {
-		LERR("socket: %s\n", strerror(errno));
+		LERR("socket: %s", strerror(errno));
 		freeaddrinfo(res0);
 		return -1;
 	}
 	if (bind(fd, res0->ai_addr, res0->ai_addrlen) == -1) {
-		LERR("bind: %s\n", strerror(errno));
+		LERR("bind: %s", strerror(errno));
 		freeaddrinfo(res0);
 		close(fd);
 		return -1;
@@ -283,27 +334,94 @@ open_raw(struct in_addr *myv4, const char *myv4str)
 }
 
 static int
+open_sigxfr(void)
+{
+	struct sigaction sa;
+
+	if (pipe(sigxfr) == -1) {
+		LERR("pipe: %s", strerror(errno));
+		return -1;
+	}
+	if (set_nonblocking(sigxfr[1]) == -1) {
+		close(sigxfr[0]);
+		close(sigxfr[1]);
+		return -1;
+	}
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = &sighandler;
+	sa.sa_flags = SA_RESTART;
+	(void)sigaction(SIGHUP, &sa, NULL);
+	(void)sigaction(SIGINT, &sa, NULL);
+	(void)sigaction(SIGTERM, &sa, NULL);
+	sa.sa_handler = SIG_IGN;
+	(void)sigaction(SIGPIPE, &sa, NULL);
+	return 0;
+}
+
+static void
+sighandler(int signo)
+{
+	(void)write(sigxfr[1], &signo, sizeof(signo));
+}
+
+static int
+set_nonblocking(int fd)
+{
+	int flags;
+
+	if ((flags = fcntl(fd, F_GETFL)) == -1) {
+		LERR("fcntl(F_GETFL): %s", strerror(errno));
+		return -1;
+	}
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+		LERR("fcntl(O_NONBLOCK): %s", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+static int
 loop(struct connection *c)
 {
 	fd_set rfds, rfds0;
-	int maxfd, ret;
+	int maxfd, signo, ret;
 
 	FD_ZERO(&rfds0);
 	FD_SET(c->fd_tun, &rfds0);
 	FD_SET(c->fd_raw, &rfds0);
+	FD_SET(sigxfr[0], &rfds0);
 	maxfd = c->fd_tun > c->fd_raw ? c->fd_tun : c->fd_raw;
+	maxfd = sigxfr[0] > maxfd ? sigxfr[0] : maxfd;
 
 	for (;;) {
 		rfds = rfds0;
 		ret = select(maxfd + 1, &rfds, NULL, NULL, NULL);
 		if (ret == -1) {
-			LERR("select: %s\n", strerror(errno));
+			if (errno == EINTR)
+				continue;
+			LERR("select: %s", strerror(errno));
 			return -1;
 		}
 		if (FD_ISSET(c->fd_tun, &rfds))
 			tun2raw(c);
 		if (FD_ISSET(c->fd_raw, &rfds))
 			raw2tun(c);
+		if (FD_ISSET(sigxfr[0], &rfds)) {
+			if (read(sigxfr[0], &signo, sizeof(signo)) == -1) {
+				LERR("read: %s", strerror(errno));
+				return -1;
+			}
+			switch (signo) {
+			case SIGHUP:
+				break;
+			case SIGTERM:
+			case SIGINT:
+				return 0;
+			default:
+				LERR("unexpected signal %d", signo);
+				break;
+			}
+		}
 	}
 	/* NOTREACHED */
 	return 0;
@@ -319,7 +437,7 @@ tun2raw(struct connection *c)
 	size_t ret;
 
 	if ((ret = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
-		LERR("read from tun: %s\n", strerror(errno));
+		LERR("read from tun: %s", strerror(errno));
 		return;
 	}
 	if (ret == sizeof(buf)) {
@@ -336,16 +454,16 @@ tun2raw(struct connection *c)
 	 * We can encapsulate only IPv6 packets.
 	 */
 	if (ret < TUN_HEAD_LEN) {
-		LDEBUG("tun2raw: no address family\n");
+		LDEBUG("tun2raw: no address family");
 		return;
 	}
 	if ((family = load32(buf)) != AF_INET6) {
-		LDEBUG("tun2raw: non-IPv6 packet (%lu)\n", family);
+		LDEBUG("tun2raw: non-IPv6 packet (%lu)", family);
 		return;
 	}
 
 	if (ret - TUN_HEAD_LEN < sizeof(*ip6)) {
-		LDEBUG("tun2raw: no IPv6 header (%zu)\n", ret - TUN_HEAD_LEN);
+		LDEBUG("tun2raw: no IPv6 header (%zu)", ret - TUN_HEAD_LEN);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + TUN_HEAD_LEN);
@@ -356,8 +474,7 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("tun2raw: source is not me (%s)\n",
-		    addr62str(ip6->src));
+		LDEBUG("tun2raw: source is not me (%s)", addr62str(ip6->src));
 		return;
 	}
 
@@ -368,7 +485,7 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
 		if (reject_v4(ip6->dst + c->prefixlenbyte)) {
-			LDEBUG("tun2raw: reject IPv4 destination (%s)\n",
+			LDEBUG("tun2raw: reject IPv4 destination (%s)",
 			    addr42str(ip6->dst + c->prefixlenbyte));
 			return;
 		}
@@ -378,7 +495,7 @@ tun2raw(struct connection *c)
 		dst = &direct;
 	} else {
 		if (reject_v6(ip6->dst)) {
-			LDEBUG("tun2raw: reject IPv6 destination (%s)\n",
+			LDEBUG("tun2raw: reject IPv6 destination (%s)",
 			    addr62str(ip6->dst));
 			return;
 		}
@@ -388,10 +505,10 @@ tun2raw(struct connection *c)
 
 	if ((ret = sendto(c->fd_raw, buf + TUN_HEAD_LEN, ret - TUN_HEAD_LEN, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
-		LERR("write to raw: %s\n", strerror(errno));
+		LERR("write to raw: %s", strerror(errno));
 		return;
 	}
-	LDEBUG("%zu bytes written to raw\n", ret);
+	LDEBUG("%zu bytes written to raw", ret);
 }
 
 static void
@@ -403,7 +520,7 @@ raw2tun(struct connection *c)
 	size_t skip, ret;
 
 	if ((ret = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
-		LERR("read from raw: %s\n", strerror(errno));
+		LERR("read from raw: %s", strerror(errno));
 		return;
 	}
 	if (ret == sizeof(buf)) {
@@ -417,7 +534,7 @@ raw2tun(struct connection *c)
 	}
 
 	if (ret < sizeof(*ip4)) {
-		LDEBUG("raw2tun: no IPv4 header (%zu)\n", ret);
+		LDEBUG("raw2tun: no IPv4 header (%zu)", ret);
 		return;
 	}
 	ip4 = (struct ipv4_header *)buf;
@@ -427,17 +544,16 @@ raw2tun(struct connection *c)
 	 */
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
-		LDEBUG("raw2tun: IPv4 header too short (%zu)\n", skip);
+		LDEBUG("raw2tun: IPv4 header too short (%zu)", skip);
 		return;
 	}
 	if (ret < skip) {
-		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)\n",
-		    ret, skip);
+		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", ret, skip);
 		return;
 	}
 
 	if (ret - skip < sizeof(*ip6)) {
-		LDEBUG("raw2tun: no IPv6 header (%zu)\n", ret - skip);
+		LDEBUG("raw2tun: no IPv6 header (%zu)", ret - skip);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + skip);
@@ -450,12 +566,12 @@ raw2tun(struct connection *c)
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) == 0) {
 		if (memcmp(ip4->src, ip6->src + c->prefixlenbyte, 4) != 0) {
 			LDEBUG("raw2tun: embedded and outer IPv4 address "
-			    "mismatch (%s, %s)\n",
+			    "mismatch (%s, %s)",
 			    addr62str(ip6->src), addr42str(ip4->src));
 			return;
 		}
 		if (reject_v4(ip6->src + c->prefixlenbyte)) {
-			LDEBUG("raw2tun: reject IPv4 source (%s)\n",
+			LDEBUG("raw2tun: reject IPv4 source (%s)",
 			    addr42str(ip6->src + c->prefixlenbyte));
 			return;
 		}
@@ -463,12 +579,12 @@ raw2tun(struct connection *c)
 		/* Not true for 6to4; non-RFC-3068-anycast relays exist. */
 		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
 			LDEBUG("raw2tun: native address from non-relaying "
-			    "router (%s, %s)\n",
+			    "router (%s, %s)",
 			    addr62str(ip6->src), addr42str(ip4->src));
 			return;
 		}
 		if (reject_v6(ip6->src)) {
-			LDEBUG("raw2tun: reject IPv6 source (%s)\n",
+			LDEBUG("raw2tun: reject IPv6 source (%s)",
 			    addr62str(ip6->src));
 			return;
 		}
@@ -479,7 +595,7 @@ raw2tun(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->dst + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("raw2tun: destination is not me (%s)\n",
+		LDEBUG("raw2tun: destination is not me (%s)",
 		    addr62str(ip6->dst));
 		return;
 	}
@@ -492,10 +608,10 @@ raw2tun(struct connection *c)
 	store32(buf + skip, AF_INET6);
 
 	if ((ret = write(c->fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
-		LERR("write to tun: %s\n", strerror(errno));
+		LERR("write to tun: %s", strerror(errno));
 		return;
 	}
-	LDEBUG("%zu bytes written to tun\n", ret);
+	LDEBUG("%zu bytes written to tun", ret);
 }
 
 /*
@@ -563,13 +679,7 @@ addr62str(const uint8_t *addr6)
 }
 
 
-uint16_t
-load16(const char *buf)
-{
-	return ((uint16_t)(unsigned char)buf[0] << 8) + (unsigned char)buf[1];
-}
-
-uint32_t
+static uint32_t
 load32(const char *buf)
 {
 	return ((uint32_t)(unsigned char)buf[0] << 24) +
@@ -578,14 +688,7 @@ load32(const char *buf)
 	    (unsigned char)buf[3];
 }
 
-void
-store16(char *buf, uint16_t val)
-{
-	buf[0] = val >> 8;
-	buf[1] = val;
-}
-
-void
+static void
 store32(char *buf, uint32_t val)
 {
 	buf[0] = val >> 24;
