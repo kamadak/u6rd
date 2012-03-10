@@ -89,11 +89,11 @@ struct options {
 static void usage(void);
 static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
-    const char *prefixstr);
-static int parse_relay(struct sockaddr_in *relay, const char *relaystr);
-static int open_tun(const char *devstr);
-static int ifconfig(const char *devstr);
-static int open_raw(struct in_addr *myv4, const char *myv4str);
+    const char *prefixarg);
+static int parse_relay(struct sockaddr_in *relay, const char *relayarg);
+static int open_tun(const char *devarg);
+static int ifconfig(const char *devarg);
+static int open_raw(struct in_addr *myv4, const char *myv4arg);
 static int open_sigxfr(void);
 static void sighandler(int signo);
 static int set_nonblocking(int fd);
@@ -117,7 +117,7 @@ int
 main(int argc, char *argv[])
 {
 	struct connection con;
-	char *devstr, *prefixstr, *relaystr, *myv4str;
+	char *devarg, *prefixarg, *relayarg, *myv4arg;
 	int c;
 
 	setprogname(argv[0]);
@@ -148,25 +148,25 @@ main(int argc, char *argv[])
 	argv += optind;
 	if (argc != 4)
 		usage();
-	devstr = argv[0];
-	prefixstr = argv[1];
-	relaystr = argv[2];
-	myv4str = argv[3];
+	devarg = argv[0];
+	prefixarg = argv[1];
+	relayarg = argv[2];
+	myv4arg = argv[3];
 
 	openlog(NULL, LOG_PERROR, LOG_DAEMON);
 	if (options.debug == 0)
 		setlogmask(LOG_UPTO(LOG_INFO));
 
-	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixstr) == -1)
+	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixarg) == -1)
 		exit(1);
-	if (parse_relay(&con.relay, relaystr) == -1)
+	if (parse_relay(&con.relay, relayarg) == -1)
 		exit(1);
 
-	if ((con.fd_tun = open_tun(devstr)) == -1)
+	if ((con.fd_tun = open_tun(devarg)) == -1)
 		exit(1);
-	if (ifconfig(devstr) == -1)
+	if (ifconfig(devarg) == -1)
 		exit(1);
-	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == -1)
+	if ((con.fd_raw = open_raw(&con.myv4, myv4arg)) == -1)
 		exit(1);
 	if (open_sigxfr() == -1)
 		exit(1);
@@ -217,18 +217,18 @@ version(void)
 
 static int
 parse_prefix(struct in6_addr *prefix, int *prefixlenbyte,
-    const char *prefixstr)
+    const char *prefixarg)
 {
-	char buf[INET6_ADDRSTRLEN + 3], *p;
+	char buf[INET6_ADDRSTRLEN + 4], *p;
 	int prefixlen, ret;
 
 	/*
-	 * Modifying strings pointed to by argv[n] (not limited to argv[0])
-	 * is allowed by C99, but it is not a good idea, because
-	 * modification is visible to ps(1) on NetBSD.
+	 * Modifying strings pointed to by argv[n] is allowed in C99, but
+	 * it is not a good idea, because modification to them (not limited
+	 * to argv[0]) is visible to ps(1) on NetBSD.
 	 */
-	if (strlcpy(buf, prefixstr, sizeof(buf)) >= sizeof(buf)) {
-		LERR("%s: prefix string too long", prefixstr);
+	if (strlcpy(buf, prefixarg, sizeof(buf)) >= sizeof(buf)) {
+		LERR("%s: prefix string too long", prefixarg);
 		return -1;
 	}
 
@@ -262,7 +262,7 @@ parse_prefix(struct in6_addr *prefix, int *prefixlenbyte,
 }
 
 static int
-parse_relay(struct sockaddr_in *relay, const char *relaystr)
+parse_relay(struct sockaddr_in *relay, const char *relayarg)
 {
 	struct addrinfo hints, *res0;
 	int gairet;
@@ -272,9 +272,9 @@ parse_relay(struct sockaddr_in *relay, const char *relaystr)
 	hints.ai_socktype = SOCK_RAW;
 	hints.ai_protocol = IPPROTO_IPV6;
 	hints.ai_flags = AI_NUMERICHOST;
-	gairet = getaddrinfo(relaystr, NULL, &hints, &res0);
+	gairet = getaddrinfo(relayarg, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s", relaystr, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s", relayarg, gai_strerror(gairet));
 		return -1;
 	}
 	if (sizeof(*relay) != res0->ai_addrlen) {
@@ -288,7 +288,7 @@ parse_relay(struct sockaddr_in *relay, const char *relaystr)
 }
 
 static int
-open_tun(const char *devstr)
+open_tun(const char *devarg)
 {
 	char devpath[32];
 	size_t len;
@@ -296,9 +296,9 @@ open_tun(const char *devstr)
 
 	on = 1;
 
-	len = snprintf(devpath, sizeof(devpath), "%s/%s", DEV_DIR, devstr);
+	len = snprintf(devpath, sizeof(devpath), "%s/%s", DEV_DIR, devarg);
 	if (len >= sizeof(devpath)) {
-		LERR("device pathname too long");
+		LERR("%s: device pathname too long", devarg);
 		return -1;
 	}
 	if ((fd = open(devpath, O_RDWR, 0)) == -1) {
@@ -318,15 +318,15 @@ open_tun(const char *devstr)
 }
 
 static int
-ifconfig(const char *devstr)
+ifconfig(const char *devarg)
 {
 	struct ifreq ifr;
 	int fd;
 
 	memset(&ifr, 0, sizeof(ifr));
-	if (strlcpy(ifr.ifr_name, devstr, sizeof(ifr.ifr_name)) >=
+	if (strlcpy(ifr.ifr_name, devarg, sizeof(ifr.ifr_name)) >=
 	    sizeof(ifr.ifr_name)) {
-		LERR("interface name too long");
+		LERR("%s: interface name too long", devarg);
 		return -1;
 	}
 
@@ -336,13 +336,13 @@ ifconfig(const char *devstr)
 		return -1;
 	}
 	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
-		LERR("ioctl(SIOCGIFFLAGS): %s: %s", devstr, strerror(errno));
+		LERR("ioctl(SIOCGIFFLAGS): %s: %s", devarg, strerror(errno));
 		close(fd);
 		return -1;
 	}
 	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
 	if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1) {
-		LERR("ioctl(SIOCSIFFLAGS): %s: %s", devstr, strerror(errno));
+		LERR("ioctl(SIOCSIFFLAGS): %s: %s", devarg, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -351,7 +351,7 @@ ifconfig(const char *devstr)
 }
 
 static int
-open_raw(struct in_addr *myv4, const char *myv4str)
+open_raw(struct in_addr *myv4, const char *myv4arg)
 {
 	struct addrinfo hints, *res0;
 	int fd, gairet;
@@ -361,9 +361,9 @@ open_raw(struct in_addr *myv4, const char *myv4str)
 	hints.ai_socktype = SOCK_RAW;
 	hints.ai_protocol = IPPROTO_IPV6;
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-	gairet = getaddrinfo(myv4str, NULL, &hints, &res0);
+	gairet = getaddrinfo(myv4arg, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s", myv4str, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s", myv4arg, gai_strerror(gairet));
 		return -1;
 	}
 	if (res0->ai_family != AF_INET) {
@@ -379,7 +379,7 @@ open_raw(struct in_addr *myv4, const char *myv4str)
 		return -1;
 	}
 	if (bind(fd, res0->ai_addr, res0->ai_addrlen) == -1) {
-		LERR("bind: %s", strerror(errno));
+		LERR("bind: %s: %s", myv4arg, strerror(errno));
 		freeaddrinfo(res0);
 		close(fd);
 		return -1;
@@ -490,26 +490,27 @@ tun2raw(struct connection *c)
 	struct sockaddr_in direct, *dst;
 	struct ipv6_header *ip6;
 	unsigned long family;
-	size_t ret;
+	const char *reason;
+	size_t len;
 
-	if ((ret = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
-		LERR("read from tun: %s", strerror(errno));
+	if ((len = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
+		LERR("read: tun: %s", strerror(errno));
 		return;
 	}
-	if (ret == sizeof(buf)) {
+	if (len == sizeof(buf)) {
 		LDEBUG("tun2raw: packet too big");
 		return;
 	}
 
 	if (options.debug > 1) {
 		fprintf(stderr, "tun2raw:\n");
-		dump(buf, ret);
+		dump(buf, len);
 	}
 
 	/*
 	 * We can encapsulate only IPv6 packets.
 	 */
-	if (ret < TUN_HEAD_LEN) {
+	if (len < TUN_HEAD_LEN) {
 		LDEBUG("tun2raw: no address family");
 		return;
 	}
@@ -518,8 +519,8 @@ tun2raw(struct connection *c)
 		return;
 	}
 
-	if (ret - TUN_HEAD_LEN < sizeof(*ip6)) {
-		LDEBUG("tun2raw: no IPv6 header (%zu)", ret - TUN_HEAD_LEN);
+	if (len - TUN_HEAD_LEN < sizeof(*ip6)) {
+		LDEBUG("tun2raw: no IPv6 header (%zu)", len - TUN_HEAD_LEN);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + TUN_HEAD_LEN);
@@ -530,8 +531,8 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("tun2raw: source is not me (%s)", addr62str(ip6->src));
-		return;
+		reason = "source is not me";
+		goto reject;
 	}
 
 	/*
@@ -541,9 +542,8 @@ tun2raw(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
 		if (reject_v4(ip6->dst + c->prefixlenbyte)) {
-			LDEBUG("tun2raw: reject IPv4 destination (%s)",
-			    addr42str(ip6->dst + c->prefixlenbyte));
-			return;
+			reason = "reject IPv4 destination";
+			goto reject;
 		}
 		/* Send to the direct peer. */
 		direct = c->relay;
@@ -551,20 +551,25 @@ tun2raw(struct connection *c)
 		dst = &direct;
 	} else {
 		if (reject_v6(ip6->dst)) {
-			LDEBUG("tun2raw: reject IPv6 destination (%s)",
-			    addr62str(ip6->dst));
-			return;
+			reason = "reject IPv6 destination";
+			goto reject;
 		}
 		/* Send to the relay. */
 		dst = &c->relay;
 	}
 
-	if ((ret = sendto(c->fd_raw, buf + TUN_HEAD_LEN, ret - TUN_HEAD_LEN, 0,
+	if ((len = sendto(c->fd_raw, buf + TUN_HEAD_LEN, len - TUN_HEAD_LEN, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
-		LERR("write to raw: %s", strerror(errno));
+		LERR("write: raw: %s", strerror(errno));
 		return;
 	}
-	LDEBUG("%zu bytes written to raw", ret);
+	LDEBUG("out %s %s n=%u s=%zu",
+	    addr62str(ip6->src), addr62str(ip6->dst),
+	    ip6->next_header, len - TUN_HEAD_LEN);
+	return;
+reject:
+	LDEBUG("tun2raw: %s (%s %s)", reason,
+	    addr62str(ip6->src), addr62str(ip6->dst));
 }
 
 static void
@@ -573,24 +578,25 @@ raw2tun(struct connection *c)
 	char buf[2048];
 	struct ipv4_header *ip4;
 	struct ipv6_header *ip6;
-	size_t skip, ret;
+	const char *reason;
+	size_t len, skip;
 
-	if ((ret = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
-		LERR("read from raw: %s", strerror(errno));
+	if ((len = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
+		LERR("read: raw: %s", strerror(errno));
 		return;
 	}
-	if (ret == sizeof(buf)) {
+	if (len == sizeof(buf)) {
 		LDEBUG("raw2tun: packet too big");
 		return;
 	}
 
 	if (options.debug > 1) {
 		fprintf(stderr, "raw2tun:\n");
-		dump(buf, ret);
+		dump(buf, len);
 	}
 
-	if (ret < sizeof(*ip4)) {
-		LDEBUG("raw2tun: no IPv4 header (%zu)", ret);
+	if (len < sizeof(*ip4)) {
+		LDEBUG("raw2tun: no IPv4 header (%zu)", len);
 		return;
 	}
 	ip4 = (struct ipv4_header *)buf;
@@ -603,13 +609,13 @@ raw2tun(struct connection *c)
 		LDEBUG("raw2tun: IPv4 header too short (%zu)", skip);
 		return;
 	}
-	if (ret < skip) {
-		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", ret, skip);
+	if (len < skip) {
+		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", len, skip);
 		return;
 	}
 
-	if (ret - skip < sizeof(*ip6)) {
-		LDEBUG("raw2tun: no IPv6 header (%zu)", ret - skip);
+	if (len - skip < sizeof(*ip6)) {
+		LDEBUG("raw2tun: no IPv6 header (%zu)", len - skip);
 		return;
 	}
 	ip6 = (struct ipv6_header *)(buf + skip);
@@ -621,28 +627,22 @@ raw2tun(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) == 0) {
 		if (memcmp(ip4->src, ip6->src + c->prefixlenbyte, 4) != 0) {
-			LDEBUG("raw2tun: embedded and outer IPv4 address "
-			    "mismatch (%s, %s)",
-			    addr62str(ip6->src), addr42str(ip4->src));
-			return;
+			reason = "embedded address differs from IPv4 source";
+			goto reject;
 		}
 		if (reject_v4(ip6->src + c->prefixlenbyte)) {
-			LDEBUG("raw2tun: reject IPv4 source (%s)",
-			    addr42str(ip6->src + c->prefixlenbyte));
-			return;
+			reason = "reject IPv4 source";
+			goto reject;
 		}
 	} else {
 		/* Not true for 6to4; non-RFC-3068-anycast relays exist. */
 		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
-			LDEBUG("raw2tun: native address from non-relaying "
-			    "router (%s, %s)",
-			    addr62str(ip6->src), addr42str(ip4->src));
-			return;
+			reason = "native address from non-relaying router";
+			goto reject;
 		}
 		if (reject_v6(ip6->src)) {
-			LDEBUG("raw2tun: reject IPv6 source (%s)",
-			    addr62str(ip6->src));
-			return;
+			reason = "reject IPv6 source";
+			goto reject;
 		}
 	}
 
@@ -651,9 +651,8 @@ raw2tun(struct connection *c)
 	 */
 	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) != 0 ||
 	    memcmp(&c->myv4, ip6->dst + c->prefixlenbyte, 4) != 0) {
-		LDEBUG("raw2tun: destination is not me (%s)",
-		    addr62str(ip6->dst));
-		return;
+		reason = "destination is not me";
+		goto reject;
 	}
 
 	/*
@@ -663,11 +662,17 @@ raw2tun(struct connection *c)
 	skip -= TUN_HEAD_LEN;
 	store32(buf + skip, AF_INET6);
 
-	if ((ret = write(c->fd_tun, buf + skip, ret - skip)) == (size_t)-1) {
-		LERR("write to tun: %s", strerror(errno));
+	if ((len = write(c->fd_tun, buf + skip, len - skip)) == (size_t)-1) {
+		LERR("write: tun: %s", strerror(errno));
 		return;
 	}
-	LDEBUG("%zu bytes written to tun", ret);
+	LDEBUG("in  %s %s %s n=%u s=%zu",
+	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src),
+	    ip6->next_header, len - skip - TUN_HEAD_LEN);
+	return;
+reject:
+	LDEBUG("raw2tun: %s (%s %s %s)", reason,
+	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src));
 }
 
 /*
@@ -726,9 +731,12 @@ addr42str(const uint8_t *addr4)
 static const char *
 addr62str(const uint8_t *addr6)
 {
-	static char buf[INET6_ADDRSTRLEN];
+	static char cyclicbuf[2][INET6_ADDRSTRLEN];
+	static int idx;
+	char *buf;
 
-	if (inet_ntop(AF_INET6, addr6, buf, sizeof(buf)) != NULL)
+	buf = cyclicbuf[idx = (idx + 1) % lengthof(cyclicbuf)];
+	if (inet_ntop(AF_INET6, addr6, buf, sizeof(cyclicbuf[0])) != NULL)
 		return buf;
 	else
 		return "(error)";

@@ -5,8 +5,8 @@ User-space 6rd (RFC 5569) daemon
    u6rd is a user-space 6rd (RFC 5569) router implementation.  It runs on
    tun(4) and the raw socket interface.
 
-Environments
-------------
+Platforms
+---------
    Modern *BSD systems with IPv6 support for:
    - raw BSD sockets
    - tun(4) interface

@@ -34,6 +34,8 @@
 		}							\
 	} while (0 /* CONSTCOND */)
 
+#define lengthof(array)		(sizeof(array) / sizeof((array)[0]))
+
 int run_as(const char *user);
 int make_pidfile(void);
 int write_pidfile(void);

@@ -24,13 +24,13 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 7, 2012
+.Dd March 10, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
 .Sh NAME
 .Nm u6rd
-.Nd user-space 6rd daemon
+.Nd user-space 6rd (RFC 5569) daemon
 .\" ----------------------------------------------------------------
 .Sh SYNOPSIS
 .Nm
@@ -101,7 +101,7 @@ Example parameters in this section:
 203.0.113.1
 .El
 .Pp
-Note that converting from IPv4 decimal to IPv6 colon hexadecimal notation,
+Note that, converting from IPv4 decimal to IPv6 colon hexadecimal notation,
 198.51.100.1 and 203.0.113.1 correspond to
 c633:6401 and cb00:7101 respectively.
 .Ss FreeBSD 9.0
@@ -155,6 +155,8 @@ Supported prefix length is only 16, 24, and 32.
 .It
 Some policies (e.g., rejecting private addresses) are hard-coded.
 You need to modify the source code to change those policies.
+.It
+Packets are discarded silently without returning ICMPv6 messages.
 .El
 .\"
 .\" EOF
