@@ -1,0 +1,58 @@
+$Id$
+
+User-space 6rd (RFC 5569) daemon
+--------------------------------
+   u6rd is a user-space 6rd (RFC 5569) router implementation.  It runs on
+   tun(4) and the raw socket interface.
+
+Environments
+------------
+   Modern *BSD systems with IPv6 support for:
+   - raw BSD sockets
+   - tun(4) interface
+
+Installation
+------------
+   % make
+   # make install
+
+Configuration
+-------------
+   See the u6rd(8) manual page.
+
+References
+----------
+   [RFC3056] B. Carpenter and K. Moore, "Connection of IPv6 Domains via IPv4
+             Clouds", RFC 3056, February 2001.
+   [RFC5569] R. Despres, "IPv6 Rapid Deployment on IPv4 Infrastructures
+             (6rd)", RFC 5569, January 2010.
+
+Copyright and License
+---------------------
+
+   Copyright (c) 2012 KAMADA Ken'ichi.
+   All rights reserved.
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions
+   are met:
+   1. Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+   2. Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+
+   THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+   ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+   ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+   FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+   DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+   OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+   HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+   SUCH DAMAGE.
+
+-- 
+KAMADA Ken'ichi
