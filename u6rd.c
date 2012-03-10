@@ -29,6 +29,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <net/if_tun.h>
 #include <netinet/in.h>
 #include <errno.h>
@@ -43,6 +44,7 @@
 #include <unistd.h>
 
 #include "version.h"
+#include "pathnames.h"
 #include "util.h"
 
 #define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
@@ -90,6 +92,7 @@ static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixstr);
 static int parse_relay(struct sockaddr_in *relay, const char *relaystr);
 static int open_tun(const char *devstr);
+static int ifconfig(const char *devstr);
 static int open_raw(struct in_addr *myv4, const char *myv4str);
 static int open_sigxfr(void);
 static void sighandler(int signo);
@@ -161,6 +164,8 @@ main(int argc, char *argv[])
 
 	if ((con.fd_tun = open_tun(devstr)) == -1)
 		exit(1);
+	if (ifconfig(devstr) == -1)
+		exit(1);
 	if ((con.fd_raw = open_raw(&con.myv4, myv4str)) == -1)
 		exit(1);
 	if (open_sigxfr() == -1)
@@ -198,7 +203,7 @@ main(int argc, char *argv[])
 static void
 usage(void)
 {
-	printf("usage: %s [-dFhV] [-u user] /dev/tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
+	printf("usage: %s [-dFhV] [-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
 	exit(1);
 }
@@ -285,25 +290,64 @@ parse_relay(struct sockaddr_in *relay, const char *relaystr)
 static int
 open_tun(const char *devstr)
 {
+	char devpath[32];
+	size_t len;
 	int fd, on;
 
 	on = 1;
 
-	if ((fd = open(devstr, O_RDWR, 0)) == -1) {
-		LERR("open: %s: %s", devstr, strerror(errno));
+	len = snprintf(devpath, sizeof(devpath), "%s/%s", DEV_DIR, devstr);
+	if (len >= sizeof(devpath)) {
+		LERR("device pathname too long");
+		return -1;
+	}
+	if ((fd = open(devpath, O_RDWR, 0)) == -1) {
+		LERR("open: %s: %s", devpath, strerror(errno));
 		return -1;
 	}
 	/*
-	 * Requied (at least) on NetBSD to receive non-IPv4 packets.
-	 * If IFHEAD is set, protocol family (4 bytes) is prepended to a
-	 * packet.
+	 * Requied to receive non-IPv4 packets.  If IFHEAD is set, protocol
+	 * family (4 bytes) is prepended to each packet.
 	 */
 	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
-		LERR("ioctl(TUNSIFHEAD): %s: %s", devstr, strerror(errno));
+		LERR("ioctl(TUNSIFHEAD): %s: %s", devpath, strerror(errno));
 		close(fd);
 		return -1;
 	}
 	return fd;
+}
+
+static int
+ifconfig(const char *devstr)
+{
+	struct ifreq ifr;
+	int fd;
+
+	memset(&ifr, 0, sizeof(ifr));
+	if (strlcpy(ifr.ifr_name, devstr, sizeof(ifr.ifr_name)) >=
+	    sizeof(ifr.ifr_name)) {
+		LERR("interface name too long");
+		return -1;
+	}
+
+	/* Needs a dummy socket. */
+	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+		LERR("socket: %s", strerror(errno));
+		return -1;
+	}
+	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
+		LERR("ioctl(SIOCGIFFLAGS): %s: %s", devstr, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
+	if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1) {
+		LERR("ioctl(SIOCSIFFLAGS): %s: %s", devstr, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	return 0;
 }
 
 static int

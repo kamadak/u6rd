@@ -25,4 +25,5 @@
  * SUCH DAMAGE.
  */
 
+#define DEV_DIR		"/dev"
 #define PIDFILE_DIR	VAR_DIR "/run"
