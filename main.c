@@ -565,7 +565,7 @@ tun2raw(struct connection *c)
 	}
 	LDEBUG("out %s %s n=%u s=%zu",
 	    addr62str(ip6->src), addr62str(ip6->dst),
-	    ip6->next_header, len - TUN_HEAD_LEN);
+	    ip6->next_header, len);
 	return;
 reject:
 	LDEBUG("tun2raw: %s (%s %s)", reason,
@@ -668,7 +668,7 @@ raw2tun(struct connection *c)
 	}
 	LDEBUG("in  %s %s %s n=%u s=%zu",
 	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src),
-	    ip6->next_header, len - skip - TUN_HEAD_LEN);
+	    ip6->next_header, len - TUN_HEAD_LEN);
 	return;
 reject:
 	LDEBUG("raw2tun: %s (%s %s %s)", reason,
