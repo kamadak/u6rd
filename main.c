@@ -78,6 +78,14 @@ struct connection {
 	struct sockaddr_in relay;
 	int fd_tun;
 	int fd_raw;
+	unsigned long ipkts;
+	unsigned long ierrs;
+	unsigned long irjct;
+	unsigned long ibytes;
+	unsigned long opkts;
+	unsigned long oerrs;
+	unsigned long orjct;
+	unsigned long obytes;
 };
 
 struct options {
@@ -116,6 +124,7 @@ static int sigxfr[2];
 int
 main(int argc, char *argv[])
 {
+	static const struct connection con0;
 	struct connection con;
 	char *devarg, *prefixarg, *relayarg, *myv4arg;
 	int c;
@@ -152,6 +161,8 @@ main(int argc, char *argv[])
 	prefixarg = argv[1];
 	relayarg = argv[2];
 	myv4arg = argv[3];
+
+	con = con0;
 
 	openlog(NULL, LOG_PERROR, LOG_DAEMON);
 	if (options.debug == 0)
@@ -409,6 +420,7 @@ open_sigxfr(void)
 	(void)sigaction(SIGHUP, &sa, NULL);
 	(void)sigaction(SIGINT, &sa, NULL);
 	(void)sigaction(SIGTERM, &sa, NULL);
+	(void)sigaction(SIGINFO, &sa, NULL);
 	sa.sa_handler = SIG_IGN;
 	(void)sigaction(SIGPIPE, &sa, NULL);
 	return 0;
@@ -473,6 +485,13 @@ loop(struct connection *c)
 			case SIGTERM:
 			case SIGINT:
 				return 0;
+			case SIGINFO:
+				LINFO("Ipkts %lu, Ierrs %lu, Irjct %lu, "
+				    "Ibytes %lu, Opkts %lu, Oerrs %lu, "
+				    "Orjct %lu, Obytes %lu",
+				    c->ipkts, c->ierrs, c->irjct, c->ibytes,
+				    c->opkts, c->oerrs, c->orjct, c->obytes);
+				break;
 			default:
 				LERR("unexpected signal %d", signo);
 				break;
@@ -495,11 +514,11 @@ tun2raw(struct connection *c)
 
 	if ((len = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
 		LERR("read: tun: %s", strerror(errno));
-		return;
+		goto error;
 	}
 	if (len == sizeof(buf)) {
 		LDEBUG("tun2raw: packet too big");
-		return;
+		goto error;
 	}
 
 	if (options.debug > 1) {
@@ -512,16 +531,16 @@ tun2raw(struct connection *c)
 	 */
 	if (len < TUN_HEAD_LEN) {
 		LDEBUG("tun2raw: no address family");
-		return;
+		goto error;
 	}
 	if ((family = load32(buf)) != AF_INET6) {
 		LDEBUG("tun2raw: non-IPv6 packet (%lu)", family);
-		return;
+		goto error;
 	}
 
 	if (len - TUN_HEAD_LEN < sizeof(*ip6)) {
 		LDEBUG("tun2raw: no IPv6 header (%zu)", len - TUN_HEAD_LEN);
-		return;
+		goto error;
 	}
 	ip6 = (struct ipv6_header *)(buf + TUN_HEAD_LEN);
 
@@ -561,15 +580,21 @@ tun2raw(struct connection *c)
 	if ((len = sendto(c->fd_raw, buf + TUN_HEAD_LEN, len - TUN_HEAD_LEN, 0,
 	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
 		LERR("write: raw: %s", strerror(errno));
-		return;
+		goto error;
 	}
 	LDEBUG("out %s %s n=%u s=%zu",
 	    addr62str(ip6->src), addr62str(ip6->dst),
 	    ip6->next_header, len);
+	c->opkts++;
+	c->obytes += len;
 	return;
 reject:
 	LDEBUG("tun2raw: %s (%s %s)", reason,
 	    addr62str(ip6->src), addr62str(ip6->dst));
+	c->orjct++;
+	return;
+error:
+	c->oerrs++;
 }
 
 static void
@@ -583,11 +608,11 @@ raw2tun(struct connection *c)
 
 	if ((len = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
 		LERR("read: raw: %s", strerror(errno));
-		return;
+		goto error;
 	}
 	if (len == sizeof(buf)) {
 		LDEBUG("raw2tun: packet too big");
-		return;
+		goto error;
 	}
 
 	if (options.debug > 1) {
@@ -597,7 +622,7 @@ raw2tun(struct connection *c)
 
 	if (len < sizeof(*ip4)) {
 		LDEBUG("raw2tun: no IPv4 header (%zu)", len);
-		return;
+		goto error;
 	}
 	ip4 = (struct ipv4_header *)buf;
 
@@ -607,16 +632,16 @@ raw2tun(struct connection *c)
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
 		LDEBUG("raw2tun: IPv4 header too short (%zu)", skip);
-		return;
+		goto error;
 	}
 	if (len < skip) {
 		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", len, skip);
-		return;
+		goto error;
 	}
 
 	if (len - skip < sizeof(*ip6)) {
 		LDEBUG("raw2tun: no IPv6 header (%zu)", len - skip);
-		return;
+		goto error;
 	}
 	ip6 = (struct ipv6_header *)(buf + skip);
 
@@ -664,15 +689,21 @@ raw2tun(struct connection *c)
 
 	if ((len = write(c->fd_tun, buf + skip, len - skip)) == (size_t)-1) {
 		LERR("write: tun: %s", strerror(errno));
-		return;
+		goto error;
 	}
 	LDEBUG("in  %s %s %s n=%u s=%zu",
 	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src),
 	    ip6->next_header, len - TUN_HEAD_LEN);
+	c->ipkts++;
+	c->ibytes += len - TUN_HEAD_LEN;
 	return;
 reject:
 	LDEBUG("raw2tun: %s (%s %s %s)", reason,
 	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src));
+	c->irjct++;
+	return;
+error:
+	c->ierrs++;
 }
 
 /*

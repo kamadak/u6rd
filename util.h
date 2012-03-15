@@ -27,6 +27,7 @@
 
 #define LERR(...)	syslog(LOG_ERR, __VA_ARGS__)
 #define LNOTICE(...)	syslog(LOG_NOTICE, __VA_ARGS__)
+#define LINFO(...)	syslog(LOG_INFO, __VA_ARGS__)
 #define LDEBUG(...)	do {						\
 		if (options.debug > 0) {				\
 			fprintf(stderr, __VA_ARGS__);			\
