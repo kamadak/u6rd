@@ -43,6 +43,6 @@ lint:
 clang-analyze:
 	clang --analyze $(CPPFLAGS) $(SRCS)
 clean:
-	rm -f $(PROG) $(SRCS:.c=.o)
+	rm -f $(PROG) $(OBJS)
 distclean: clean
 	rm -f .depend
