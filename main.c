@@ -47,6 +47,7 @@
 #include "pathnames.h"
 #include "util.h"
 
+#define DEFAULT_6RD_MTU	1280
 #define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 
 struct ipv4_header {
@@ -349,6 +350,12 @@ ifconfig(const char *devarg)
 	/* Needs a dummy socket. */
 	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
 		LERR("socket: %s", strerror(errno));
+		return -1;
+	}
+	ifr.ifr_mtu = DEFAULT_6RD_MTU;
+	if (ioctl(fd, SIOCSIFMTU, &ifr) == -1) {
+		LERR("ioctl(SIOCSIFMTU): %s: %s", devarg, strerror(errno));
+		close(fd);
 		return -1;
 	}
 	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {

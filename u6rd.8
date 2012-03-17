@@ -24,7 +24,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 15, 2012
+.Dd March 17, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
@@ -77,7 +77,13 @@ is your global IPv4 address.
 .Pp
 Currently,
 .Nm
-does only minimal work (i.e., encapsulation/decapsulation and forwarding).
+does only minimal preparation;
+.Bl -bullet -compact
+.It
+setting the MTU of the interface to 1280, and
+.It
+setting UP and RUNNING flags on it.
+.El
 You need to create a tun interface, set parameters on it,
 and modify the routing table by yourself.
 See
@@ -109,7 +115,6 @@ c633:6401 and cb00:7101 respectively.
 .Ss FreeBSD 9.0
 .Bd -literal
 # ifconfig tun0 create
-# ifconfig tun0 mtu 1280
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # ifconfig tun0 inet6 -nud
 # route add -inet6 default 2001:db8:c633:6401::1
@@ -124,7 +129,6 @@ remember to reconfigure the address.
 .Ss NetBSD 5.1
 .Bd -literal
 # ifconfig tun0 create
-# ifconfig tun0 mtu 1280
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # sysctl -w net.inet6.tcp6.mss_ifmtu=1
 # route add -inet6 default 2001:db8:c633:6401::1
