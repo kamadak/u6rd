@@ -72,6 +72,8 @@ struct ipv6_header {
 };
 
 struct connection {
+	char *buf;
+	size_t size;
 	struct in6_addr prefix;
 	int prefixlenbyte;
 	struct in_addr myv4;
@@ -124,7 +126,6 @@ static int sigxfr[2];
 int
 main(int argc, char *argv[])
 {
-	static const struct connection con0;
 	struct connection con;
 	char *devarg, *prefixarg, *relayarg, *myv4arg;
 	int c;
@@ -162,11 +163,15 @@ main(int argc, char *argv[])
 	relayarg = argv[2];
 	myv4arg = argv[3];
 
-	con = con0;
-
 	openlog(NULL, LOG_PERROR, LOG_DAEMON);
 	if (options.debug == 0)
 		setlogmask(LOG_UPTO(LOG_INFO));
+
+	con = (struct connection){.size = 2048};
+	if ((con.buf = (char *)malloc(con.size)) == NULL) {
+		LERR("out of memory");
+		exit(1);
+	}
 
 	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixarg) == -1)
 		exit(1);
@@ -505,18 +510,19 @@ loop(struct connection *c)
 static void
 tun2raw(struct connection *c)
 {
-	char buf[2048];
+	char *buf;
 	struct sockaddr_in direct, *dst;
 	struct ipv6_header *ip6;
 	unsigned long family;
 	const char *reason;
 	size_t len;
 
-	if ((len = read(c->fd_tun, buf, sizeof(buf))) == (size_t)-1) {
+	buf = c->buf;
+	if ((len = read(c->fd_tun, buf, c->size)) == (size_t)-1) {
 		LERR("read: tun: %s", strerror(errno));
 		goto error;
 	}
-	if (len == sizeof(buf)) {
+	if (len == c->size) {
 		LDEBUG("tun2raw: packet too big");
 		goto error;
 	}
@@ -537,12 +543,14 @@ tun2raw(struct connection *c)
 		LDEBUG("tun2raw: non-IPv6 packet (%lu)", family);
 		goto error;
 	}
+	buf += TUN_HEAD_LEN;
+	len -= TUN_HEAD_LEN;
 
-	if (len - TUN_HEAD_LEN < sizeof(*ip6)) {
-		LDEBUG("tun2raw: no IPv6 header (%zu)", len - TUN_HEAD_LEN);
+	if (len < sizeof(*ip6)) {
+		LDEBUG("tun2raw: no IPv6 header (%zu)", len);
 		goto error;
 	}
-	ip6 = (struct ipv6_header *)(buf + TUN_HEAD_LEN);
+	ip6 = (struct ipv6_header *)buf;
 
 	/*
 	 * Check if the embedded address in the source IPv6 packet matches
@@ -577,8 +585,8 @@ tun2raw(struct connection *c)
 		dst = &c->relay;
 	}
 
-	if ((len = sendto(c->fd_raw, buf + TUN_HEAD_LEN, len - TUN_HEAD_LEN, 0,
-	    (struct sockaddr *)dst, sizeof(*dst))) == (size_t)-1) {
+	if (sendto(c->fd_raw, buf, len, 0,
+	    (struct sockaddr *)dst, sizeof(*dst)) == -1) {
 		LERR("write: raw: %s", strerror(errno));
 		goto error;
 	}
@@ -600,17 +608,18 @@ error:
 static void
 raw2tun(struct connection *c)
 {
-	char buf[2048];
+	char *buf;
 	struct ipv4_header *ip4;
 	struct ipv6_header *ip6;
 	const char *reason;
 	size_t len, skip;
 
-	if ((len = recv(c->fd_raw, buf, sizeof(buf), 0)) == (size_t)-1) {
+	buf = c->buf;
+	if ((len = recv(c->fd_raw, buf, c->size, 0)) == (size_t)-1) {
 		LERR("read: raw: %s", strerror(errno));
 		goto error;
 	}
-	if (len == sizeof(buf)) {
+	if (len == c->size) {
 		LDEBUG("raw2tun: packet too big");
 		goto error;
 	}
@@ -627,7 +636,7 @@ raw2tun(struct connection *c)
 	ip4 = (struct ipv4_header *)buf;
 
 	/*
-	 * Check the IPv4 header length.  Usually 20.
+	 * Check the IPv4 header length.  Usually 20 octets.
 	 */
 	skip = (ip4->ver_hlen & 0xf) * 4;
 	if (skip < sizeof(*ip4)) {
@@ -638,12 +647,14 @@ raw2tun(struct connection *c)
 		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", len, skip);
 		goto error;
 	}
+	buf += skip;
+	len -= skip;
 
-	if (len - skip < sizeof(*ip6)) {
-		LDEBUG("raw2tun: no IPv6 header (%zu)", len - skip);
+	if (len < sizeof(*ip6)) {
+		LDEBUG("raw2tun: no IPv6 header (%zu)", len);
 		goto error;
 	}
-	ip6 = (struct ipv6_header *)(buf + skip);
+	ip6 = (struct ipv6_header *)buf;
 
 	/*
 	 * If the IPv6 source address is within the prefix, the embedded IPv4
@@ -684,18 +695,17 @@ raw2tun(struct connection *c)
 	 * Prepend protocol family information for TUNSIFHEAD.
 	 * Space is reused from the IPv4 header.
 	 */
-	skip -= TUN_HEAD_LEN;
-	store32(buf + skip, AF_INET6);
+	store32(buf - TUN_HEAD_LEN, AF_INET6);
 
-	if ((len = write(c->fd_tun, buf + skip, len - skip)) == (size_t)-1) {
+	if (write(c->fd_tun, buf - TUN_HEAD_LEN, len + TUN_HEAD_LEN) == -1) {
 		LERR("write: tun: %s", strerror(errno));
 		goto error;
 	}
 	LDEBUG("in  %s %s %s n=%u s=%zu",
 	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src),
-	    ip6->next_header, len - TUN_HEAD_LEN);
+	    ip6->next_header, len);
 	c->ipkts++;
-	c->ibytes += len - TUN_HEAD_LEN;
+	c->ibytes += len;
 	return;
 reject:
 	LDEBUG("raw2tun: %s (%s %s %s)", reason,
