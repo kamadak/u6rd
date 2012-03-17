@@ -109,6 +109,7 @@ static int open_sigxfr(void);
 static void sighandler(int signo);
 static int set_nonblocking(int fd);
 static int loop(struct connection *c);
+static int read_signal(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
 static int reject_v4(const uint8_t *addr4);
@@ -132,7 +133,6 @@ main(int argc, char *argv[])
 	int c;
 
 	setprogname(argv[0]);
-
 	while ((c = getopt(argc, argv, "dFhu:V")) != -1) {
 		switch (c) {
 		case 'd':
@@ -464,7 +464,7 @@ static int
 loop(struct connection *c)
 {
 	fd_set rfds, rfds0;
-	int maxfd, signo, ret;
+	int maxfd, ret;
 
 	FD_ZERO(&rfds0);
 	FD_SET(c->fd_tun, &rfds0);
@@ -487,30 +487,37 @@ loop(struct connection *c)
 		if (FD_ISSET(c->fd_raw, &rfds))
 			raw2tun(c);
 		if (FD_ISSET(sigxfr[0], &rfds)) {
-			if (read(sigxfr[0], &signo, sizeof(signo)) == -1) {
-				LERR("read: %s", strerror(errno));
-				return -1;
-			}
-			switch (signo) {
-			case SIGHUP:
-				break;
-			case SIGTERM:
-			case SIGINT:
-				return 0;
-			case SIGINFO:
-				LINFO("Ipkts %lu, Ierrs %lu, Irjct %lu, "
-				    "Ibytes %lu, Opkts %lu, Oerrs %lu, "
-				    "Orjct %lu, Obytes %lu",
-				    c->ipkts, c->ierrs, c->irjct, c->ibytes,
-				    c->opkts, c->oerrs, c->orjct, c->obytes);
-				break;
-			default:
-				LERR("unexpected signal %d", signo);
-				break;
-			}
+			if ((ret = read_signal(c)) != 0)
+				return ret;
 		}
 	}
-	/* NOTREACHED */
+}
+
+static int
+read_signal(struct connection *c)
+{
+	int signo;
+
+	if (read(sigxfr[0], &signo, sizeof(signo)) == -1) {
+		LERR("read: %s", strerror(errno));
+		return -1;
+	}
+	switch (signo) {
+	case SIGHUP:
+		break;
+	case SIGTERM:
+	case SIGINT:
+		return 1;
+	case SIGINFO:
+		LINFO("Ipkts %lu, Ierrs %lu, Irjct %lu, Ibytes %lu, "
+		    "Opkts %lu, Oerrs %lu, Orjct %lu, Obytes %lu",
+		    c->ipkts, c->ierrs, c->irjct, c->ibytes,
+		    c->opkts, c->oerrs, c->orjct, c->obytes);
+		break;
+	default:
+		LERR("unexpected signal %d", signo);
+		break;
+	}
 	return 0;
 }
 
@@ -651,7 +658,7 @@ raw2tun(struct connection *c)
 		goto error;
 	}
 	if (len < skip) {
-		LDEBUG("raw2tun: IPv4 header too long (%zu < %zu)", len, skip);
+		LDEBUG("raw2tun: IPv4 header too long (%zu, %zu)", len, skip);
 		goto error;
 	}
 	buf += skip;

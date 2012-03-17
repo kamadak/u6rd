@@ -43,10 +43,15 @@
 .\" ----------------------------------------------------------------
 .Sh DESCRIPTION
 .Nm
-is a user-space 6rd (RFC 5569) router implementation.
-It runs on
+is a user-space 6rd (RFC 5569) implementation, which uses
 .Xr tun 4
 and the raw socket interface.
+.Pp
+It runs on the 6rd border router of a 6rd site that is isolated
+from the native IPv6 Internet.
+In other words, it does not provide the functionality of 6rd
+.Qq relay
+routers.
 .Pp
 The following options are available:
 .Bl -tag -width "-a 012"
@@ -95,7 +100,7 @@ exits on
 .Dv SIGTERM
 or
 .Dv SIGINT .
-Packet counts are logged to syslog on
+Packet counts are logged to syslog (with LOG_INFO priority) on
 .Dv SIGINFO .
 .\" ----------------------------------------------------------------
 .Sh EXAMPLES
@@ -121,7 +126,7 @@ c633:6401 and cb00:7101 respectively.
 # u6rd -u nobody tun0 2001:db8::/32 198.51.100.1 203.0.113.1
 .Ed
 .Pp
-Keep in mind that FreeBSD's tun driver will reset its address
+FreeBSD's tun driver will reset its address
 after the owning process exits.
 When you restart
 .Nm ,
