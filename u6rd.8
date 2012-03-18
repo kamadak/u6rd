@@ -24,7 +24,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 17, 2012
+.Dd March 18, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
@@ -153,6 +153,19 @@ The PID file of the current instance of the daemon.
 .Xr ifconfig 8 ,
 .Xr route 8 ,
 .Xr sysctl 8
+.Rs
+.%A B. Carpenter
+.%A K. Moore
+.%T Connection of IPv6 Domains via IPv4 Clouds
+.%R RFC 3056
+.%D February 2001
+.Re
+.Rs
+.%A R. Despres
+.%T IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)
+.%R RFC 5569
+.%D January 2010
+.Re
 .\" ----------------------------------------------------------------
 .Sh AUTHORS
 .An "KAMADA Ken'ichi" .
@@ -165,7 +178,11 @@ Relay router functionality is not (and will never be) implemented.
 Supported prefix length is only 16, 24, and 32.
 .It
 Some policies (e.g., rejecting private addresses) are hard-coded.
-You need to modify the source code to change those policies.
+You need to modify the source code to change those policies,
+when, for example,
+you want to use private addresses as described in Section 4 of RFC 5569.
+.It
+Embedding a part of IPv4 addresses is not implemented.
 .It
 Packets are discarded silently without returning ICMPv6 messages.
 .El
