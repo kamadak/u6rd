@@ -1,7 +1,8 @@
 $Id$
 
-current
+1.1 (2012-03-18)
 
+   - The first stable version.
    - Packet counts are written to syslog on SIGINFO.
    - The MTU of the tun interface is set to 1280 by the daemon.
 
