@@ -18,7 +18,7 @@ INSTALL_DATA=@INSTALL_DATA@
 CFLAGS=@CFLAGS@
 CPPFLAGS=@CPPFLAGS@ @DEFS@ -DVAR_DIR=\"$(localstatedir)\"
 LDFLAGS=@LDFLAGS@
-#LIBOBJS=@LIBOBJS@
+LIBOBJS=@LIBOBJS@
 LIBS=@LIBS@
 
 PROG=u6rd
@@ -35,6 +35,9 @@ $(PROG): $(OBJS) $(LIBOBJS)
 
 u6rd.8: u6rd.8.in
 	sed -e "s%@exp_localstatedir@%$(localstatedir)%" < $? > $@
+
+getprogname.o: compat/getprogname.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $?
 
 install: all
 	$(INSTALL) -d $(Dsbindir)

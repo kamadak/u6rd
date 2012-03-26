@@ -16,6 +16,7 @@ dnl Checks for libraries.
 dnl Checks for typedefs, structures, and compiler characteristics.
 
 dnl Checks for library functions.
+AC_REPLACE_FUNCS(getprogname)
 
 dnl Package options
 if test x"$GCC" = xyes; then

@@ -36,6 +36,8 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#include "compat/compat.h"
+
 #include "pathnames.h"
 #include "util.h"
 

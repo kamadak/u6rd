@@ -3,6 +3,7 @@ $Id$
 current
 
    - Use autoconf.
+   - Fix compilation on OpenBSD.
 
 1.1 (2012-03-18)
 
