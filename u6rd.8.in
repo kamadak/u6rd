@@ -144,7 +144,7 @@ Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
 .\" ----------------------------------------------------------------
 .Sh FILES
 .Bl -tag -width "01234567" -compact
-.It Pa /var/run/u6rd.pid
+.It Pa @exp_localstatedir@/run/u6rd.pid
 The PID file of the current instance of the daemon.
 .El
 .\" ----------------------------------------------------------------

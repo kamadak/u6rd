@@ -2,6 +2,8 @@ $Id$
 
 current
 
+   - Use autoconf.
+
 1.1 (2012-03-18)
 
    - The first stable version.

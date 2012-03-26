@@ -17,6 +17,7 @@ Platforms
 
 Installation
 ------------
+   % ./configure
    % make
    # make install
 
