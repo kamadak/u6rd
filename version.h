@@ -26,6 +26,6 @@
  */
 
 #define PROGNAME	"u6rd"
-#define VERSION		"1.1"
+#define VERSION		"1.2"
 
 #define PROGVERSION	PROGNAME "/" VERSION

@@ -1,5 +1,7 @@
 $Id$
 
+1.2 (2012-03-27)
+
    - Use autoconf.
    - Fix compilation on OpenBSD.
 
