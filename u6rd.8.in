@@ -107,6 +107,12 @@ or
 Packet counts are logged to syslog (with LOG_INFO priority) on
 .Dv SIGINFO .
 .\" ----------------------------------------------------------------
+.Sh FILES
+.Bl -tag -width "01234567" -compact
+.It Pa @exp_localstatedir@/run/u6rd.pid
+The PID file of the current instance of the daemon.
+.El
+.\" ----------------------------------------------------------------
 .Sh EXAMPLES
 Example parameters in this section:
 .Bl -tag -compact
@@ -146,12 +152,6 @@ remember to reconfigure the address.
 .Pp
 Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
 .\" ----------------------------------------------------------------
-.Sh FILES
-.Bl -tag -width "01234567" -compact
-.It Pa @exp_localstatedir@/run/u6rd.pid
-The PID file of the current instance of the daemon.
-.El
-.\" ----------------------------------------------------------------
 .Sh SEE ALSO
 .Xr tun 4 ,
 .Xr ifconfig 8 ,
@@ -166,7 +166,7 @@ The PID file of the current instance of the daemon.
 .Re
 .Rs
 .%A R. Despres
-.%T IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)
+.%T "IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)"
 .%R RFC 5569
 .%D January 2010
 .Re
