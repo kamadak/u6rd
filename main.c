@@ -43,6 +43,8 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#include "compat/compat.h"
+
 #include "version.h"
 #include "pathnames.h"
 #include "util.h"
@@ -322,15 +324,19 @@ open_tun(const char *devarg)
 		LERR("open: %s: %s", devpath, strerror(errno));
 		return -1;
 	}
+#if !defined(__OpenBSD__)
 	/*
-	 * Requied to receive non-IPv4 packets.  If IFHEAD is set, protocol
-	 * family (4 bytes) is prepended to each packet.
+	 * Requied to receive non-IPv4 packets on FreeBSD and NetBSD.
+	 * If IFHEAD is set, protocol family (4 bytes) is prepended
+	 * to each packet.  OpenBSD does the same thing from the beginning,
+	 * so there is no flag.
 	 */
 	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
 		LERR("ioctl(TUNSIFHEAD): %s: %s", devpath, strerror(errno));
 		close(fd);
 		return -1;
 	}
+#endif
 	return fd;
 }
 

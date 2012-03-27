@@ -1,0 +1,58 @@
+# $Id$
+
+srcdir=@srcdir@
+VPATH=@srcdir@
+
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+sbindir=@sbindir@
+localstatedir=@localstatedir@
+mandir=@mandir@
+Dsbindir=$(DESTDIR)$(sbindir)
+Dmandir=$(DESTDIR)$(mandir)
+
+CC=@CC@
+INSTALL=@INSTALL@
+INSTALL_PROGRAM=@INSTALL_PROGRAM@
+INSTALL_DATA=@INSTALL_DATA@
+CFLAGS=@CFLAGS@
+CPPFLAGS=@CPPFLAGS@ @DEFS@ -DVAR_DIR=\"$(localstatedir)\"
+LDFLAGS=@LDFLAGS@
+LIBOBJS=@LIBOBJS@
+LIBS=@LIBS@
+
+PROG=u6rd
+SRCS=main.c util.c
+OBJS=$(SRCS:.c=.o)
+
+all: $(PROG) u6rd.8
+
+$(PROG): $(OBJS) $(LIBOBJS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBOBJS) $(LIBS)
+
+.c.o:
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+
+u6rd.8: u6rd.8.in
+	sed -e "s%@exp_localstatedir@%$(localstatedir)%" < $? > $@
+
+getprogname.o: compat/getprogname.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $?
+
+install: all
+	$(INSTALL) -d $(Dsbindir)
+	$(INSTALL_PROGRAM) $(PROG) $(Dsbindir)
+	$(INSTALL) -d $(Dmandir)/man8
+	$(INSTALL_DATA) u6rd.8 $(Dmandir)/man8
+
+depend:
+	mkdep -- $(CPPFLAGS) $(SRCS)
+lint:
+	lint $(CPPFLAGS) $(LINTFLAGS) $(SRCS)
+clang-analyze:
+	clang --analyze $(CPPFLAGS) $(SRCS)
+clean:
+	rm -f $(PROG) $(OBJS) $(LIBOBJS) u6rd.8
+distclean: clean
+	rm -f config.cache config.status config.log .depend
+	rm -f Makefile

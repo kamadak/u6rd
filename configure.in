@@ -1,0 +1,26 @@
+dnl $Id$
+
+define([extraquote],[[[$1]]])
+define([defnsubst],[define([$1],patsubst(extraquote(defn([$1])),[$2],[$3])))])
+defnsubst([AC_INIT_PARSE_ARGS], ['${prefix}/var'], ['/var'])
+defnsubst([AC_INIT_PARSE_ARGS], [PREFIX/var], [/var])
+
+AC_INIT(u6rd.8.in)
+
+dnl Checks for programs.
+AC_PROG_CC
+AC_PROG_INSTALL
+
+dnl Checks for libraries.
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+
+dnl Checks for library functions.
+AC_REPLACE_FUNCS(getprogname)
+
+dnl Package options
+if test x"$GCC" = xyes; then
+	CFLAGS="$CFLAGS -Wall -W"
+fi
+
+AC_OUTPUT(Makefile)
