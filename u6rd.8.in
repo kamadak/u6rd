@@ -24,13 +24,13 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 18, 2012
+.Dd March 27, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
 .Sh NAME
 .Nm u6rd
-.Nd user-space 6rd (RFC 5569) daemon
+.Nd user-space 6rd (RFC 5569) implementation
 .\" ----------------------------------------------------------------
 .Sh SYNOPSIS
 .Nm
@@ -57,6 +57,10 @@ The following options are available:
 .Bl -tag -width "-a 012"
 .It Fl d
 Output debug messages to stderr.
+This option is usually combined with
+.Fl F
+so that stderr is not redirected to
+.Pa /dev/null .
 .It Fl F
 Run in the foreground.
 .Nm
