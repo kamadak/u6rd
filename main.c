@@ -61,8 +61,8 @@ struct ipv4_header {
 	uint8_t ttl;
 	uint8_t protocol;
 	uint16_t cksum;
-	uint8_t src[4];
-	uint8_t dst[4];
+	struct in_addr src;
+	struct in_addr dst;
 };
 
 struct ipv6_header {
@@ -70,16 +70,17 @@ struct ipv6_header {
 	uint16_t len;
 	uint8_t next_header;
 	uint8_t hop_limit;
-	uint8_t src[16];
-	uint8_t dst[16];
+	struct in6_addr src;
+	struct in6_addr dst;
 };
 
 struct connection {
 	char *buf;
 	size_t size;
-	struct in6_addr prefix;
-	int prefixlenbyte;
-	struct in_addr myv4;
+	struct in6_addr v6prefix;	/* 6rd prefix + embedded IPv4 addr */
+	int v6prefixlen;
+	struct in_addr v4me;
+	int v4commonlen;
 	struct sockaddr_in relay;
 	int fd_tun;
 	int fd_raw;
@@ -94,6 +95,7 @@ struct connection {
 };
 
 struct options {
+	const char *commonlen;
 	int debug;
 	int foreground;
 	const char *user;
@@ -106,7 +108,7 @@ static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
 static int parse_relay(struct sockaddr_in *relay, const char *relayarg);
 static int open_tun(const char *devarg);
 static int ifconfig(const char *devarg);
-static int open_raw(struct in_addr *myv4, const char *myv4arg);
+static int open_raw(struct in_addr *v4me, const char *v4mearg);
 static int open_sigxfr(void);
 static void sighandler(int signo);
 static int set_nonblocking(int fd);
@@ -114,13 +116,20 @@ static int loop(struct connection *c);
 static int read_signal(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
-static int reject_v4(const uint8_t *addr4);
-static int reject_v6(const uint8_t *addr6);
-static const char *addr42str(const uint8_t *addr4);
-static const char *addr62str(const uint8_t *addr6);
+static int reject_v4(const struct in_addr *addr4);
+static int reject_v6(const struct in6_addr *addr6);
+static int cmp_v6prefix(const struct in6_addr *prefix,
+    const struct in6_addr *addr6, int bits);
+static void extract_v4(struct in_addr *addr4,
+    const struct in_addr *v4me, int v4commonlen,
+    const struct in6_addr *addr6, int v6prefixlen);
+static void embed_v4(struct in6_addr *addr6, int v6prefixlen,
+    const struct in_addr *v4me, int v4commonlen);
+static const char *addr42str(const struct in_addr *addr4);
+static const char *addr62str(const struct in6_addr *addr6);
 
-static uint32_t load32(const char *buf);
-static void store32(char *buf, uint32_t val);
+static uint32_t load32(const void *buf);
+static void store32(void *buf, uint32_t val);
 
 static void dump(const char *ptr, size_t len);
 
@@ -131,11 +140,11 @@ int
 main(int argc, char *argv[])
 {
 	struct connection con;
-	char *devarg, *prefixarg, *relayarg, *myv4arg;
+	char *devarg, *prefixarg, *relayarg, *v4mearg;
 	int c;
 
 	setprogname(argv[0]);
-	while ((c = getopt(argc, argv, "dFhu:V")) != -1) {
+	while ((c = getopt(argc, argv, "dFhr:u:V")) != -1) {
 		switch (c) {
 		case 'd':
 			options.debug++;
@@ -146,6 +155,9 @@ main(int argc, char *argv[])
 		case 'h':
 			usage();
 			/* NOTREACHED */
+		case 'r':
+			options.commonlen = optarg;
+			break;
 		case 'u':
 			options.user = optarg;
 			break;
@@ -164,7 +176,7 @@ main(int argc, char *argv[])
 	devarg = argv[0];
 	prefixarg = argv[1];
 	relayarg = argv[2];
-	myv4arg = argv[3];
+	v4mearg = argv[3];
 
 	openlog(NULL, LOG_PERROR, LOG_DAEMON);
 	if (options.debug == 0)
@@ -176,7 +188,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	if (parse_prefix(&con.prefix, &con.prefixlenbyte, prefixarg) == -1)
+	if (parse_prefix(&con.v6prefix, &con.v6prefixlen, prefixarg) == -1)
 		exit(1);
 	if (parse_relay(&con.relay, relayarg) == -1)
 		exit(1);
@@ -185,10 +197,22 @@ main(int argc, char *argv[])
 		exit(1);
 	if (ifconfig(devarg) == -1)
 		exit(1);
-	if ((con.fd_raw = open_raw(&con.myv4, myv4arg)) == -1)
+	if ((con.fd_raw = open_raw(&con.v4me, v4mearg)) == -1)
 		exit(1);
 	if (open_sigxfr() == -1)
 		exit(1);
+
+	if (options.commonlen != NULL)
+		con.v4commonlen = atoi(options.commonlen);	/* XXX */
+	if (con.v4commonlen < 0 || con.v4commonlen > 31) {
+		LERR("common prefix length of IPv4 out of range");
+		exit(1);
+	}
+	if (con.v6prefixlen + (32 - con.v4commonlen) > 64) {
+		LERR("site prefix length is longer than 64");
+		exit(1);
+	}
+	embed_v4(&con.v6prefix, con.v6prefixlen, &con.v4me, con.v4commonlen);
 
 	if (!options.foreground && make_pidfile() == -1)
 		exit(1);
@@ -222,7 +246,7 @@ main(int argc, char *argv[])
 static void
 usage(void)
 {
-	printf("usage: %s [-dFhV] [-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
+	printf("usage: %s [-dFhV] [-r v4_common_len] [-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
 	exit(1);
 }
@@ -235,11 +259,11 @@ version(void)
 }
 
 static int
-parse_prefix(struct in6_addr *prefix, int *prefixlenbyte,
+parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixarg)
 {
 	char buf[INET6_ADDRSTRLEN + 4], *p;
-	int prefixlen, ret;
+	int ret;
 
 	/*
 	 * Modifying strings pointed to by argv[n] is allowed in C99, but
@@ -265,18 +289,16 @@ parse_prefix(struct in6_addr *prefix, int *prefixlenbyte,
 		return -1;
 	}
 
-	prefixlen = atoi(p);		/* XXX overflow */
-	/* FP + TLA uses 16 bits.  Not longer than 32 [RFC5569 3]. */
-	if (prefixlen < 16 || prefixlen > 32) {
-		LERR("prefixlen must be between 16 and 32");
+	*prefixlen = atoi(p);		/* XXX overflow */
+	/*
+	 * FP + TLA uses 16 bits.  The maximum prefix length in RFC 5569
+	 * is 32 [RFC5569 3], but it is said that some ISPs use longer
+	 * prefixes.
+	 */
+	if (*prefixlen < 16 || *prefixlen > 63) {
+		LERR("prefixlen must be between 16 and 63");
 		return -1;
 	}
-	if (prefixlen % 8 != 0) {
-		LERR("prefixlen that is not a multiple of 8 is "
-		    "not implemented");
-		return -1;
-	}
-	*prefixlenbyte = prefixlen / 8;
 	return 0;
 }
 
@@ -380,7 +402,7 @@ ifconfig(const char *devarg)
 }
 
 static int
-open_raw(struct in_addr *myv4, const char *myv4arg)
+open_raw(struct in_addr *v4me, const char *v4mearg)
 {
 	struct addrinfo hints, *res0;
 	int fd, gairet;
@@ -390,9 +412,9 @@ open_raw(struct in_addr *myv4, const char *myv4arg)
 	hints.ai_socktype = SOCK_RAW;
 	hints.ai_protocol = IPPROTO_IPV6;
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-	gairet = getaddrinfo(myv4arg, NULL, &hints, &res0);
+	gairet = getaddrinfo(v4mearg, NULL, &hints, &res0);
 	if (gairet != 0) {
-		LERR("getaddrinfo: %s: %s", myv4arg, gai_strerror(gairet));
+		LERR("getaddrinfo: %s: %s", v4mearg, gai_strerror(gairet));
 		return -1;
 	}
 	if (res0->ai_family != AF_INET) {
@@ -400,7 +422,7 @@ open_raw(struct in_addr *myv4, const char *myv4arg)
 		freeaddrinfo(res0);
 		return -1;
 	}
-	*myv4 = ((struct sockaddr_in *)res0->ai_addr)->sin_addr;
+	*v4me = ((struct sockaddr_in *)res0->ai_addr)->sin_addr;
 
 	if ((fd = socket(PF_INET, SOCK_RAW, IPPROTO_IPV6)) == -1) {
 		LERR("socket: %s", strerror(errno));
@@ -408,7 +430,7 @@ open_raw(struct in_addr *myv4, const char *myv4arg)
 		return -1;
 	}
 	if (bind(fd, res0->ai_addr, res0->ai_addrlen) == -1) {
-		LERR("bind: %s: %s", myv4arg, strerror(errno));
+		LERR("bind: %s: %s", v4mearg, strerror(errno));
 		freeaddrinfo(res0);
 		close(fd);
 		return -1;
@@ -576,8 +598,8 @@ tun2raw(struct connection *c)
 	 * Check if the embedded address in the source IPv6 packet matches
 	 * with my IPv4 address.  If not, the response will not reach me.
 	 */
-	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) != 0 ||
-	    memcmp(&c->myv4, ip6->src + c->prefixlenbyte, 4) != 0) {
+	if (cmp_v6prefix(&c->v6prefix, &ip6->src,
+	    c->v6prefixlen + (32 - c->v4commonlen)) != 0) {
 		reason = "source is not me";
 		goto reject;
 	}
@@ -587,21 +609,22 @@ tun2raw(struct connection *c)
 	 * the prefix, send an encapsulated packet to the corresponding
 	 * router directly.  Otherwise, send it to the relay router.
 	 */
-	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) == 0) {
-		if (reject_v4(ip6->dst + c->prefixlenbyte)) {
+	if (cmp_v6prefix(&c->v6prefix, &ip6->dst, c->v6prefixlen) == 0) {
+		/* Send to the direct peer. */
+		direct = c->relay;
+		extract_v4(&direct.sin_addr, &c->v4me, c->v4commonlen,
+		    &ip6->dst, c->v6prefixlen);
+		if (reject_v4(&direct.sin_addr)) {
 			reason = "reject IPv4 destination";
 			goto reject;
 		}
-		/* Send to the direct peer. */
-		direct = c->relay;
-		memcpy(&direct.sin_addr, ip6->dst + c->prefixlenbyte, 4);
 		dst = &direct;
 	} else {
-		if (reject_v6(ip6->dst)) {
+		/* Send to the relay. */
+		if (reject_v6(&ip6->dst)) {
 			reason = "reject IPv6 destination";
 			goto reject;
 		}
-		/* Send to the relay. */
 		dst = &c->relay;
 	}
 
@@ -611,14 +634,14 @@ tun2raw(struct connection *c)
 		goto error;
 	}
 	LDEBUG("out %s %s n=%u s=%zu",
-	    addr62str(ip6->src), addr62str(ip6->dst),
+	    addr62str(&ip6->src), addr62str(&ip6->dst),
 	    ip6->next_header, len);
 	c->opkts++;
 	c->obytes += len;
 	return;
 reject:
 	LDEBUG("tun2raw: %s (%s %s)", reason,
-	    addr62str(ip6->src), addr62str(ip6->dst));
+	    addr62str(&ip6->src), addr62str(&ip6->dst));
 	c->orjct++;
 	return;
 error:
@@ -629,6 +652,7 @@ static void
 raw2tun(struct connection *c)
 {
 	char *buf;
+	struct in_addr addr4;
 	struct ipv4_header *ip4;
 	struct ipv6_header *ip6;
 	const char *reason;
@@ -681,22 +705,24 @@ raw2tun(struct connection *c)
 	 * address should match with the outer one.  If not in the prefix,
 	 * it should come from the relay router.
 	 */
-	if (memcmp(&c->prefix, ip6->src, c->prefixlenbyte) == 0) {
-		if (memcmp(ip4->src, ip6->src + c->prefixlenbyte, 4) != 0) {
+	if (cmp_v6prefix(&c->v6prefix, &ip6->src, c->v6prefixlen) == 0) {
+		extract_v4(&addr4, &c->v4me, c->v4commonlen,
+		    &ip6->src, c->v6prefixlen);
+		if (memcmp(&ip4->src, &addr4, 4) != 0) {
 			reason = "embedded address differs from IPv4 source";
 			goto reject;
 		}
-		if (reject_v4(ip6->src + c->prefixlenbyte)) {
+		if (reject_v4(&addr4)) {
 			reason = "reject IPv4 source";
 			goto reject;
 		}
 	} else {
 		/* Not true for 6to4; non-RFC-3068-anycast relays exist. */
-		if (memcmp(ip4->src, &c->relay.sin_addr, 4) != 0) {
+		if (memcmp(&ip4->src, &c->relay.sin_addr, 4) != 0) {
 			reason = "native address from non-relaying router";
 			goto reject;
 		}
-		if (reject_v6(ip6->src)) {
+		if (reject_v6(&ip6->src)) {
 			reason = "reject IPv6 source";
 			goto reject;
 		}
@@ -705,8 +731,8 @@ raw2tun(struct connection *c)
 	/*
 	 * The IPv6 destination address should match with mine.
 	 */
-	if (memcmp(&c->prefix, ip6->dst, c->prefixlenbyte) != 0 ||
-	    memcmp(&c->myv4, ip6->dst + c->prefixlenbyte, 4) != 0) {
+	if (cmp_v6prefix(&c->v6prefix, &ip6->dst,
+	    c->v6prefixlen + (32 - c->v4commonlen)) != 0) {
 		reason = "destination is not me";
 		goto reject;
 	}
@@ -722,14 +748,14 @@ raw2tun(struct connection *c)
 		goto error;
 	}
 	LDEBUG("in  %s %s %s n=%u s=%zu",
-	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src),
+	    addr62str(&ip6->dst), addr62str(&ip6->src), addr42str(&ip4->src),
 	    ip6->next_header, len);
 	c->ipkts++;
 	c->ibytes += len;
 	return;
 reject:
 	LDEBUG("raw2tun: %s (%s %s %s)", reason,
-	    addr62str(ip6->dst), addr62str(ip6->src), addr42str(ip4->src));
+	    addr62str(&ip6->dst), addr62str(&ip6->src), addr42str(&ip4->src));
 	c->irjct++;
 	return;
 error:
@@ -740,13 +766,15 @@ error:
  * Reject other than global unicast IPv4 addresses [RFC3056 9].
  */
 static int
-reject_v4(const uint8_t *addr4)
+reject_v4(const struct in_addr *addr4)
 {
+	const char *p;
 	uint32_t a;
 
-	a = load32((const char *)addr4);
+	p = (const char *)addr4;
+	a = load32(p);
 
-	if (addr4[0] == 0 || addr4[0] == 127)
+	if (p[0] == 0 || p[0] == 127)
 		return 1;		/* self-identification, loopback */
 	if ((a & 0xf0000000) == 0xe0000000)
 		return 1;		/* multicast */
@@ -765,21 +793,91 @@ reject_v4(const uint8_t *addr4)
  * Reject non-global IPv6 addresses.  Multicast should be accepted.
  */
 static int
-reject_v6(const uint8_t *addr6)
+reject_v6(const struct in6_addr *addr6)
 {
-	if (addr6[0] == 0)
+	const unsigned char *p;
+
+	p = addr6->s6_addr;
+	if (p[0] == 0)
 		return 1;		/* compat, mapped, loopback, etc */
-	if (addr6[0] == 0xff && (addr6[1] & 0x0f) != 0x0e)
+	if (p[0] == 0xff && (p[1] & 0x0f) != 0x0e)
 		return 1;		/* multicast non-global */
-	if (addr6[0] == 0xfe && (addr6[1] & 0xc0) == 0x80)
+	if (p[0] == 0xfe && (p[1] & 0xc0) == 0x80)
 		return 1;		/* link-local unicast */
-	if (addr6[0] == 0xfe && (addr6[1] & 0xc0) == 0xc0)
+	if (p[0] == 0xfe && (p[1] & 0xc0) == 0xc0)
 		return 1;		/* site-local unicast */
 	return 0;
 }
 
+static int
+cmp_v6prefix(const struct in6_addr *prefix,
+    const struct in6_addr *addr6, int bits)
+{
+	const unsigned char *p1, *p2;
+
+	p1 = (const unsigned char *)prefix;
+	p2 = (const unsigned char *)addr6;
+	for (; bits >= 8; bits -= 8)
+		if (*p1++ != *p2++)
+			return 1;
+	if (bits == 0)
+		return 0;
+	return (*p1 ^ *p2) & (0xff00 >> bits);
+}
+
+static void
+extract_v4(struct in_addr *addr4,
+    const struct in_addr *v4me, int v4commonlen,
+    const struct in6_addr *addr6, int v6prefixlen)
+{
+	const char *p;
+	uint32_t a4, a6;
+
+	/* Common prefix. */
+	a4 = load32(v4me) & ~(0xffffffff >> v4commonlen);
+
+	/* Embedded part. */
+	p = (const char *)addr6;
+	for (; v6prefixlen >= 32; v6prefixlen -= 32)
+		p += 4;
+	a6 = load32(p);
+	if (v6prefixlen > 0) {
+		a6 <<= v6prefixlen;
+		a6 |= load32(p + 4) >> (32 - v6prefixlen);
+	}
+	a6 >>= v4commonlen;
+
+	store32(addr4, a4 | a6);
+}
+
+static void
+embed_v4(struct in6_addr *addr6, int v6prefixlen,
+    const struct in_addr *v4me, int v4commonlen)
+{
+	uint32_t a4, a4mask, x;
+	char *p;
+
+	/* Discard the common prefix. */
+	a4 = load32(v4me) << v4commonlen;
+	a4mask = 0xffffffff << v4commonlen;
+
+	p = (char *)addr6;
+	for (; v6prefixlen >= 32; v6prefixlen -= 32)
+		p += 4;
+	x = load32(p);
+	x &= ~(a4mask >> v6prefixlen);
+	x |= a4 >> v6prefixlen;
+	store32(p, x);
+	if (v6prefixlen > v4commonlen) {
+		x = load32(p + 4);
+		x &= ~(a4mask << (32 - v6prefixlen));
+		x |= a4 << (32 - v6prefixlen);
+		store32(p + 4, x);
+	}
+}
+
 static const char *
-addr42str(const uint8_t *addr4)
+addr42str(const struct in_addr *addr4)
 {
 	static char buf[INET_ADDRSTRLEN];
 
@@ -790,7 +888,7 @@ addr42str(const uint8_t *addr4)
 }
 
 static const char *
-addr62str(const uint8_t *addr6)
+addr62str(const struct in6_addr *addr6)
 {
 	static char cyclicbuf[2][INET6_ADDRSTRLEN];
 	static int idx;
@@ -805,21 +903,25 @@ addr62str(const uint8_t *addr6)
 
 
 static uint32_t
-load32(const char *buf)
+load32(const void *buf)
 {
-	return ((uint32_t)(unsigned char)buf[0] << 24) +
-	    ((uint32_t)(unsigned char)buf[1] << 16) +
-	    ((uint32_t)(unsigned char)buf[2] << 8) +
-	    (unsigned char)buf[3];
+	const unsigned char *p;
+
+	p = buf;
+	return ((uint32_t)p[0] << 24) + ((uint32_t)p[1] << 16) +
+	    ((uint32_t)p[2] << 8) + p[3];
 }
 
 static void
-store32(char *buf, uint32_t val)
+store32(void *buf, uint32_t val)
 {
-	buf[0] = val >> 24;
-	buf[1] = val >> 16;
-	buf[2] = val >> 8;
-	buf[3] = val;
+	unsigned char *p;
+
+	p = buf;
+	p[0] = val >> 24;
+	p[1] = val >> 16;
+	p[2] = val >> 8;
+	p[3] = val;
 }
 
 
