@@ -11,7 +11,11 @@ User-space 6rd (RFC 5569) implementation
 
 Platforms
 ---------
-   Modern *BSD systems with IPv6 support for the tun(4) interface.
+   The 6rd daemon requires the raw socket and IPv4 support for the
+   tun(4) interface.
+
+   FreeBSD
+   NetBSD
 
 Installation
 ------------
