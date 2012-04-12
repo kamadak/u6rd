@@ -9,9 +9,15 @@ AC_INIT(u6rd.8.in)
 
 dnl Checks for programs.
 AC_PROG_CC
+AC_PROG_CPP
 AC_PROG_INSTALL
 
 dnl Checks for libraries.
+
+dnl Checks for header files.
+AC_CHECK_HEADER(net/if_tun.h, [P_SRCS="$P_SRCS tun_bsd.c"],
+ [AC_CHECK_HEADER(net/if_utun.h, [P_SRCS="$P_SRCS tun_darwin.c"],
+ [AC_MSG_ERROR([No supported tunneling device.])])])
 
 dnl Checks for typedefs, structures, and compiler characteristics.
 
@@ -23,4 +29,5 @@ if test x"$GCC" = xyes; then
 	CFLAGS="$CFLAGS -Wall -W"
 fi
 
+AC_SUBST(P_SRCS)
 AC_OUTPUT(Makefile)

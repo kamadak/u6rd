@@ -24,7 +24,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 27, 2012
+.Dd April 12, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
@@ -35,6 +35,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl dFhV
+.Op Fl r Ar v4_common_len
 .Op Fl u Ar user
 .Ar tunN
 .Ar prefix Ns No / Ns Ar prefixlen
@@ -69,6 +70,11 @@ Log messages are output to the stderr in addition to syslog.
 No PID file is created.
 .It Fl h
 Show simple help messages and exit.
+.It Fl r Ar v4_common_len
+Specify the common prefix length of the IPv4 addresses
+in your 6rd addressing domain.
+This should not be confused with the length of the netmask.
+The default is 0.
 .It Fl u Ar user
 Run with the privilege of the specified user instead of root.
 .It Fl V
@@ -106,6 +112,12 @@ or
 .Dv SIGINT .
 Packet counts are logged to syslog (with LOG_INFO priority) on
 .Dv SIGINFO .
+.\" ----------------------------------------------------------------
+.Sh FILES
+.Bl -tag -width "01234567" -compact
+.It Pa @exp_localstatedir@/run/u6rd.pid
+The PID file of the current instance of the daemon.
+.El
 .\" ----------------------------------------------------------------
 .Sh EXAMPLES
 Example parameters in this section:
@@ -145,12 +157,17 @@ remember to reconfigure the address.
 .Ed
 .Pp
 Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
-.\" ----------------------------------------------------------------
-.Sh FILES
-.Bl -tag -width "01234567" -compact
-.It Pa @exp_localstatedir@/run/u6rd.pid
-The PID file of the current instance of the daemon.
-.El
+.Ss Mac OS X 10.7 (Darwin 11.3.0)
+.Bd -literal
+# u6rd -u nobody utun0 2001:db8::/32 198.51.100.1 203.0.113.1
+# ifconfig utun0 inet6 2001:db8:cb00:7101::1/32
+# route add -inet6 default 2001:db8:c633:6401::1
+.Ed
+.Pp
+The utun device, instead of tun, is used on Mac OS X.
+A utun interface is created by the daemon (cannot created with ifconfig),
+so the interface address and the default route
+need to be configured after executing the daemon.
 .\" ----------------------------------------------------------------
 .Sh SEE ALSO
 .Xr tun 4 ,
@@ -166,7 +183,7 @@ The PID file of the current instance of the daemon.
 .Re
 .Rs
 .%A R. Despres
-.%T IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)
+.%T "IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)"
 .%R RFC 5569
 .%D January 2010
 .Re
@@ -179,14 +196,10 @@ The PID file of the current instance of the daemon.
 .It
 Relay router functionality is not (and will never be) implemented.
 .It
-Supported prefix length is only 16, 24, and 32.
-.It
 Some policies (e.g., rejecting private addresses) are hard-coded.
 You need to modify the source code to change those policies,
 when, for example,
 you want to use private addresses as described in Section 4 of RFC 5569.
-.It
-Embedding a part of IPv4 addresses is not implemented.
 .It
 Packets are discarded silently without returning ICMPv6 messages.
 .El

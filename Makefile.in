@@ -22,7 +22,7 @@ LIBOBJS=@LIBOBJS@
 LIBS=@LIBS@
 
 PROG=u6rd
-SRCS=main.c util.c
+SRCS=main.c util.c @P_SRCS@
 OBJS=$(SRCS:.c=.o)
 
 all: $(PROG) u6rd.8
