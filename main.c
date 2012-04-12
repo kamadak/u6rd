@@ -30,7 +30,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <net/if.h>
-#include <net/if_tun.h>
 #include <netinet/in.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -48,6 +47,7 @@
 #include "version.h"
 #include "pathnames.h"
 #include "util.h"
+#include "tun_if.h"
 
 #define DEFAULT_6RD_MTU	1280
 #define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
@@ -106,7 +106,6 @@ static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixarg);
 static int parse_relay(struct sockaddr_in *relay, const char *relayarg);
-static int open_tun(const char *devarg);
 static int ifconfig(const char *devarg);
 static int open_raw(struct in_addr *v4me, const char *v4mearg);
 static int open_sigxfr(void);
@@ -311,7 +310,7 @@ parse_relay(struct sockaddr_in *relay, const char *relayarg)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_RAW;
-	hints.ai_protocol = IPPROTO_IPV6;
+	hints.ai_protocol = 0;
 	hints.ai_flags = AI_NUMERICHOST;
 	gairet = getaddrinfo(relayarg, NULL, &hints, &res0);
 	if (gairet != 0) {
@@ -326,40 +325,6 @@ parse_relay(struct sockaddr_in *relay, const char *relayarg)
 	*relay = *(struct sockaddr_in *)res0->ai_addr;
 	freeaddrinfo(res0);
 	return 0;
-}
-
-static int
-open_tun(const char *devarg)
-{
-	char devpath[32];
-	size_t len;
-	int fd, on;
-
-	on = 1;
-
-	len = snprintf(devpath, sizeof(devpath), "%s/%s", DEV_DIR, devarg);
-	if (len >= sizeof(devpath)) {
-		LERR("%s: device pathname too long", devarg);
-		return -1;
-	}
-	if ((fd = open(devpath, O_RDWR, 0)) == -1) {
-		LERR("open: %s: %s", devpath, strerror(errno));
-		return -1;
-	}
-#if !defined(__OpenBSD__)
-	/*
-	 * Requied to receive non-IPv4 packets on FreeBSD and NetBSD.
-	 * If IFHEAD is set, protocol family (4 bytes) is prepended
-	 * to each packet.  OpenBSD does the same thing from the beginning,
-	 * so there is no flag.
-	 */
-	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
-		LERR("ioctl(TUNSIFHEAD): %s: %s", devpath, strerror(errno));
-		close(fd);
-		return -1;
-	}
-#endif
-	return fd;
 }
 
 static int
@@ -410,7 +375,7 @@ open_raw(struct in_addr *v4me, const char *v4mearg)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_RAW;
-	hints.ai_protocol = IPPROTO_IPV6;
+	hints.ai_protocol = 0;
 	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
 	gairet = getaddrinfo(v4mearg, NULL, &hints, &res0);
 	if (gairet != 0) {

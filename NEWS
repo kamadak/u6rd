@@ -4,6 +4,7 @@ current
 
    - Support 6rd prefix length that is not a multiple of 8.
    - Support embedding a part of an IPv4 address (-r option).
+   - Fix to compile on Mac OS X (not yet tested whether it works properly).
 
 1.2 (2012-03-27)
 

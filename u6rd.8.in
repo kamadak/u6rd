@@ -157,6 +157,17 @@ remember to reconfigure the address.
 .Ed
 .Pp
 Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
+.Ss Mac OS X 10.7 (Darwin 11.3.0)
+.Bd -literal
+# u6rd -u nobody utun0 2001:db8::/32 198.51.100.1 203.0.113.1
+# ifconfig utun0 inet6 2001:db8:cb00:7101::1/32
+# route add -inet6 default 2001:db8:c633:6401::1
+.Ed
+.Pp
+The utun device, instead of tun, is used on Mac OS X.
+A utun interface is created by the daemon (cannot created with ifconfig),
+so the interface address and the default route
+need to be configured after executing the daemon.
 .\" ----------------------------------------------------------------
 .Sh SEE ALSO
 .Xr tun 4 ,
