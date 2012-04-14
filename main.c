@@ -51,6 +51,7 @@
 
 #define DEFAULT_6RD_MTU	1280
 #define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
+#define PACKET_BUF_SIZE	2048
 
 struct ipv4_header {
 	uint8_t ver_hlen;
@@ -130,7 +131,7 @@ static const char *addr62str(const struct in6_addr *addr6);
 static uint32_t load32(const void *buf);
 static void store32(void *buf, uint32_t val);
 
-static void dump(const char *ptr, size_t len);
+static void dump(const void *ptr, size_t len);
 
 static struct options options;
 static int sigxfr[2];
@@ -181,7 +182,7 @@ main(int argc, char *argv[])
 	if (options.debug == 0)
 		setlogmask(LOG_UPTO(LOG_INFO));
 
-	con = (struct connection){.size = 2048};
+	con = (struct connection){.size = PACKET_BUF_SIZE};
 	if ((con.buf = (char *)malloc(con.size)) == NULL) {
 		LERR("out of memory");
 		exit(1);
@@ -595,7 +596,7 @@ tun2raw(struct connection *c)
 
 	if (sendto(c->fd_raw, buf, len, 0,
 	    (struct sockaddr *)dst, sizeof(*dst)) == -1) {
-		LERR("write: raw: %s", strerror(errno));
+		LERR("sendto: raw: %s", strerror(errno));
 		goto error;
 	}
 	LDEBUG("out %s %s n=%u s=%zu",
@@ -625,7 +626,7 @@ raw2tun(struct connection *c)
 
 	buf = c->buf;
 	if ((len = recv(c->fd_raw, buf, c->size, 0)) == (size_t)-1) {
-		LERR("read: raw: %s", strerror(errno));
+		LERR("recv: raw: %s", strerror(errno));
 		goto error;
 	}
 	if (len == c->size) {
@@ -780,8 +781,8 @@ cmp_v6prefix(const struct in6_addr *prefix,
 {
 	const unsigned char *p1, *p2;
 
-	p1 = (const unsigned char *)prefix;
-	p2 = (const unsigned char *)addr6;
+	p1 = prefix->s6_addr;
+	p2 = addr6->s6_addr;
 	for (; bits >= 8; bits -= 8)
 		if (*p1++ != *p2++)
 			return 1;
@@ -795,21 +796,19 @@ extract_v4(struct in_addr *addr4,
     const struct in_addr *v4me, int v4commonlen,
     const struct in6_addr *addr6, int v6prefixlen)
 {
-	const char *p;
+	const unsigned char *p;
 	uint32_t a4, a6;
 
 	/* Common prefix. */
 	a4 = load32(v4me) & ~(0xffffffff >> v4commonlen);
 
 	/* Embedded part. */
-	p = (const char *)addr6;
+	p = addr6->s6_addr;
 	for (; v6prefixlen >= 32; v6prefixlen -= 32)
 		p += 4;
-	a6 = load32(p);
-	if (v6prefixlen > 0) {
-		a6 <<= v6prefixlen;
+	a6 = load32(p) << v6prefixlen;
+	if (v6prefixlen > v4commonlen)
 		a6 |= load32(p + 4) >> (32 - v6prefixlen);
-	}
 	a6 >>= v4commonlen;
 
 	store32(addr4, a4 | a6);
@@ -820,13 +819,14 @@ embed_v4(struct in6_addr *addr6, int v6prefixlen,
     const struct in_addr *v4me, int v4commonlen)
 {
 	uint32_t a4, a4mask, x;
-	char *p;
+	unsigned char *p;
 
 	/* Discard the common prefix. */
 	a4 = load32(v4me) << v4commonlen;
 	a4mask = 0xffffffff << v4commonlen;
 
-	p = (char *)addr6;
+	/* Embed into the IPv6 address. */
+	p = addr6->s6_addr;
 	for (; v6prefixlen >= 32; v6prefixlen -= 32)
 		p += 4;
 	x = load32(p);
@@ -892,10 +892,10 @@ store32(void *buf, uint32_t val)
 
 #include <ctype.h>
 static void
-dump(const char *ptr, size_t len)
+dump(const void *ptr, size_t len)
 {
 	char bufhex[56], *b, bufprint[17];
-	const char *p;
+	const unsigned char *p;
 	int i, thislen, c, used, blen;
 
 	p = ptr;
@@ -907,7 +907,7 @@ dump(const char *ptr, size_t len)
 		/* hex */
 		for (i = 0; i < 16; i++) {
 			used = i < thislen ?
-			    snprintf(b, blen, " %02x", (unsigned char)p[i]) :
+			    snprintf(b, blen, " %02x", p[i]) :
 			    snprintf(b, blen, "   ");
 			if (used < blen) {
 				b += used;
@@ -916,7 +916,7 @@ dump(const char *ptr, size_t len)
 		}
 		/* printable ASCII */
 		for (i = 0; i < thislen; i++) {
-			c = (unsigned char)p[i];
+			c = p[i];
 			bufprint[i] = isascii(c) && isprint(c) ? c : '.';
 		}
 		bufprint[i] = '\0';

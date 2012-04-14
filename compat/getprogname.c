@@ -1,6 +1,6 @@
 /* $Id$ */
 /*
- * This code was written by KAMADA Ken'ichi, and in the public domain.
+ * This code was written by KAMADA Ken'ichi and is in the public domain.
  */
 
 #include <stdlib.h>
