@@ -45,12 +45,13 @@
 #include "compat/compat.h"
 
 #include "version.h"
+#include "var.h"
 #include "pathnames.h"
 #include "util.h"
+#include "address.h"
 #include "tun_if.h"
 
 #define DEFAULT_6RD_MTU	1280
-#define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 #define PACKET_BUF_SIZE	2048
 
 struct ipv4_header {
@@ -95,13 +96,6 @@ struct connection {
 	unsigned long obytes;
 };
 
-struct options {
-	const char *commonlen;
-	int debug;
-	int foreground;
-	const char *user;
-};
-
 static void usage(void);
 static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
@@ -116,24 +110,11 @@ static int loop(struct connection *c);
 static int read_signal(struct connection *c);
 static void tun2raw(struct connection *c);
 static void raw2tun(struct connection *c);
-static int reject_v4(const struct in_addr *addr4);
-static int reject_v6(const struct in6_addr *addr6);
-static int cmp_v6prefix(const struct in6_addr *prefix,
-    const struct in6_addr *addr6, int bits);
-static void extract_v4(struct in_addr *addr4,
-    const struct in_addr *v4me, int v4commonlen,
-    const struct in6_addr *addr6, int v6prefixlen);
-static void embed_v4(struct in6_addr *addr6, int v6prefixlen,
-    const struct in_addr *v4me, int v4commonlen);
-static const char *addr42str(const struct in_addr *addr4);
-static const char *addr62str(const struct in6_addr *addr6);
-
-static uint32_t load32(const void *buf);
-static void store32(void *buf, uint32_t val);
 
 static void dump(const void *ptr, size_t len);
 
-static struct options options;
+struct options options;
+
 static int sigxfr[2];
 
 int
@@ -521,9 +502,8 @@ tun2raw(struct connection *c)
 	char *buf;
 	struct sockaddr_in direct, *dst;
 	struct ipv6_header *ip6;
-	unsigned long family;
 	const char *reason;
-	size_t len;
+	size_t len, tun_hlen;
 
 	buf = c->buf;
 	if ((len = read(c->fd_tun, buf, c->size)) == (size_t)-1) {
@@ -543,16 +523,10 @@ tun2raw(struct connection *c)
 	/*
 	 * We can encapsulate only IPv6 packets.
 	 */
-	if (len < TUN_HEAD_LEN) {
-		LDEBUG("tun2raw: no address family");
+	if ((tun_hlen = check_tun_header(buf, len)) == (size_t)-1)
 		goto error;
-	}
-	if ((family = load32(buf)) != AF_INET6) {
-		LDEBUG("tun2raw: non-IPv6 packet (%lu)", family);
-		goto error;
-	}
-	buf += TUN_HEAD_LEN;
-	len -= TUN_HEAD_LEN;
+	buf += tun_hlen;
+	len -= tun_hlen;
 
 	if (len < sizeof(*ip6)) {
 		LDEBUG("tun2raw: no IPv6 header (%zu)", len);
@@ -622,7 +596,7 @@ raw2tun(struct connection *c)
 	struct ipv4_header *ip4;
 	struct ipv6_header *ip6;
 	const char *reason;
-	size_t len, skip;
+	size_t len, skip, tun_hlen;
 
 	buf = c->buf;
 	if ((len = recv(c->fd_raw, buf, c->size, 0)) == (size_t)-1) {
@@ -707,9 +681,10 @@ raw2tun(struct connection *c)
 	 * Prepend protocol family information for TUNSIFHEAD.
 	 * Space is reused from the IPv4 header.
 	 */
-	store32(buf - TUN_HEAD_LEN, AF_INET6);
+	if ((tun_hlen = add_tun_header(buf, skip)) == (size_t)-1)
+		goto error;
 
-	if (write(c->fd_tun, buf - TUN_HEAD_LEN, len + TUN_HEAD_LEN) == -1) {
+	if (write(c->fd_tun, buf - tun_hlen, len + tun_hlen) == -1) {
 		LERR("write: tun: %s", strerror(errno));
 		goto error;
 	}
@@ -726,167 +701,6 @@ reject:
 	return;
 error:
 	c->ierrs++;
-}
-
-/*
- * Reject other than global unicast IPv4 addresses [RFC3056 9].
- */
-static int
-reject_v4(const struct in_addr *addr4)
-{
-	const char *p;
-	uint32_t a;
-
-	p = (const char *)addr4;
-	a = load32(p);
-
-	if (p[0] == 0 || p[0] == 127)
-		return 1;		/* self-identification, loopback */
-	if ((a & 0xf0000000) == 0xe0000000)
-		return 1;		/* multicast */
-	if ((a & 0xff000000) == 0x0a000000 ||
-	    (a & 0xfff00000) == 0xac100000 ||
-	    (a & 0xffff0000) == 0xc0a80000)
-		return 1;		/* private */
-	if ((a & 0xffff0000) == 0xa9fe0000)
-		return 1;		/* link-local */
-	if (a == 0xffffffff)
-		return 1;		/* limited broadcast */
-	return 0;
-}
-
-/*
- * Reject non-global IPv6 addresses.  Multicast should be accepted.
- */
-static int
-reject_v6(const struct in6_addr *addr6)
-{
-	const unsigned char *p;
-
-	p = addr6->s6_addr;
-	if (p[0] == 0)
-		return 1;		/* compat, mapped, loopback, etc */
-	if (p[0] == 0xff && (p[1] & 0x0f) != 0x0e)
-		return 1;		/* multicast non-global */
-	if (p[0] == 0xfe && (p[1] & 0xc0) == 0x80)
-		return 1;		/* link-local unicast */
-	if (p[0] == 0xfe && (p[1] & 0xc0) == 0xc0)
-		return 1;		/* site-local unicast */
-	return 0;
-}
-
-static int
-cmp_v6prefix(const struct in6_addr *prefix,
-    const struct in6_addr *addr6, int bits)
-{
-	const unsigned char *p1, *p2;
-
-	p1 = prefix->s6_addr;
-	p2 = addr6->s6_addr;
-	for (; bits >= 8; bits -= 8)
-		if (*p1++ != *p2++)
-			return 1;
-	if (bits == 0)
-		return 0;
-	return (*p1 ^ *p2) & (0xff00 >> bits);
-}
-
-static void
-extract_v4(struct in_addr *addr4,
-    const struct in_addr *v4me, int v4commonlen,
-    const struct in6_addr *addr6, int v6prefixlen)
-{
-	const unsigned char *p;
-	uint32_t a4, a6;
-
-	/* Common prefix. */
-	a4 = load32(v4me) & ~(0xffffffff >> v4commonlen);
-
-	/* Embedded part. */
-	p = addr6->s6_addr;
-	for (; v6prefixlen >= 32; v6prefixlen -= 32)
-		p += 4;
-	a6 = load32(p) << v6prefixlen;
-	if (v6prefixlen > v4commonlen)
-		a6 |= load32(p + 4) >> (32 - v6prefixlen);
-	a6 >>= v4commonlen;
-
-	store32(addr4, a4 | a6);
-}
-
-static void
-embed_v4(struct in6_addr *addr6, int v6prefixlen,
-    const struct in_addr *v4me, int v4commonlen)
-{
-	uint32_t a4, a4mask, x;
-	unsigned char *p;
-
-	/* Discard the common prefix. */
-	a4 = load32(v4me) << v4commonlen;
-	a4mask = 0xffffffff << v4commonlen;
-
-	/* Embed into the IPv6 address. */
-	p = addr6->s6_addr;
-	for (; v6prefixlen >= 32; v6prefixlen -= 32)
-		p += 4;
-	x = load32(p);
-	x &= ~(a4mask >> v6prefixlen);
-	x |= a4 >> v6prefixlen;
-	store32(p, x);
-	if (v6prefixlen > v4commonlen) {
-		x = load32(p + 4);
-		x &= ~(a4mask << (32 - v6prefixlen));
-		x |= a4 << (32 - v6prefixlen);
-		store32(p + 4, x);
-	}
-}
-
-static const char *
-addr42str(const struct in_addr *addr4)
-{
-	static char buf[INET_ADDRSTRLEN];
-
-	if (inet_ntop(AF_INET, addr4, buf, sizeof(buf)) != NULL)
-		return buf;
-	else
-		return "(error)";
-}
-
-static const char *
-addr62str(const struct in6_addr *addr6)
-{
-	static char cyclicbuf[2][INET6_ADDRSTRLEN];
-	static int idx;
-	char *buf;
-
-	buf = cyclicbuf[idx = (idx + 1) % lengthof(cyclicbuf)];
-	if (inet_ntop(AF_INET6, addr6, buf, sizeof(cyclicbuf[0])) != NULL)
-		return buf;
-	else
-		return "(error)";
-}
-
-
-static uint32_t
-load32(const void *buf)
-{
-	const unsigned char *p;
-
-	p = buf;
-	return ((uint32_t)p[0] << 24) + ((uint32_t)p[1] << 16) +
-	    ((uint32_t)p[2] << 8) + p[3];
-}
-
-static void
-store32(void *buf, uint32_t val)
-{
-	unsigned char *p;
-
-	p = buf;
-	p[0] = val >> 24;
-	p[1] = val >> 16;
-	p[2] = val >> 8;
-	p[3] = val;
 }
 
 

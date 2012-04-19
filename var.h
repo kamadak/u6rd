@@ -25,6 +25,10 @@
  * SUCH DAMAGE.
  */
 
-int open_tun(const char *devarg);
-size_t check_tun_header(const char *buf, size_t len);
-size_t add_tun_header(char *buf, size_t space);
+struct options {
+	const char *commonlen;
+	int debug;
+	int foreground;
+	const char *user;
+};
+extern struct options options;

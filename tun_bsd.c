@@ -27,17 +27,23 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 #include <net/if_tun.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
 
+#include "var.h"
 #include "pathnames.h"
 #include "util.h"
 #include "tun_if.h"
+
+#define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 
 int
 open_tun(const char *devarg)
@@ -71,4 +77,31 @@ open_tun(const char *devarg)
 	}
 #endif
 	return fd;
+}
+
+size_t
+check_tun_header(const char *buf, size_t len)
+{
+	unsigned long family;
+
+	if (len < TUN_HEAD_LEN) {
+		LDEBUG("tun: no address family");
+		return -1;
+	}
+	if ((family = ntohl(*(const uint32_t *)buf)) != AF_INET6) {
+		LDEBUG("tun: non-IPv6 packet (%lu)", family);
+		return -1;
+	}
+	return TUN_HEAD_LEN;
+}
+
+size_t
+add_tun_header(char *buf, size_t space)
+{
+	if (space < TUN_HEAD_LEN) {
+		LDEBUG("tun: no space for address family");
+		return -1;
+	}
+	*(uint32_t *)(buf - TUN_HEAD_LEN) = htonl(AF_INET6);
+	return TUN_HEAD_LEN;
 }
