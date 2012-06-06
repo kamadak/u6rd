@@ -165,7 +165,7 @@ Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
 .Ed
 .Pp
 The utun device, instead of tun, is used on Mac OS X.
-A utun interface is created by the daemon (cannot created with ifconfig),
+A utun interface is created by the daemon (cannot be created with ifconfig),
 so the interface address and the default route
 need to be configured after executing the daemon.
 .\" ----------------------------------------------------------------
