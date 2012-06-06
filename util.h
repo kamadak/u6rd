@@ -38,6 +38,6 @@
 #define lengthof(array)		(sizeof(array) / sizeof((array)[0]))
 
 int run_as(const char *user);
-int make_pidfile(void);
+int make_pidfile(const char *myname);
 int write_pidfile(void);
 void cleanup_pidfile(void);

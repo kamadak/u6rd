@@ -195,7 +195,7 @@ main(int argc, char *argv[])
 	}
 	embed_v4(&con.v6prefix, con.v6prefixlen, &con.v4me, con.v4commonlen);
 
-	if (!options.foreground && make_pidfile() == -1)
+	if (!options.foreground && make_pidfile(getprogname()) == -1)
 		exit(1);
 	if (options.user != NULL && run_as(options.user) == -1) {
 		cleanup_pidfile();

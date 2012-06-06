@@ -49,7 +49,7 @@ int
 open_tun(const char *devarg)
 {
 	struct sockaddr_ctl sc;
-	struct ctl_info info;
+	struct ctl_info ci;
 	unsigned int unit_num;
 	int fd;
 
@@ -59,9 +59,9 @@ open_tun(const char *devarg)
 		return -1;
 	}
 
-	memset(&info, 0, sizeof(info));
-	if (strlcpy(info.ctl_name, UTUN_CONTROL_NAME, sizeof(info.ctl_name)) >=
-	    sizeof(info.ctl_name)) {
+	memset(&ci, 0, sizeof(ci));
+	if (strlcpy(ci.ctl_name, UTUN_CONTROL_NAME, sizeof(ci.ctl_name)) >=
+	    sizeof(ci.ctl_name)) {
 		LERR("UTUN_CONTROL_NAME too long");
 		return -1;
 	}
@@ -69,15 +69,16 @@ open_tun(const char *devarg)
 		LERR("socket(SYSPROTO_CONTROL): %s", strerror(errno));
 		return -1;
 	}
-	if (ioctl(fd, CTLIOCGINFO, &info) == -1) {
+	if (ioctl(fd, CTLIOCGINFO, &ci) == -1) {
 		LERR("ioctl(CTLIOCGINFO): %s", strerror(errno));
 		close(fd);
 		return -1;
 	}
-	sc.sc_id = info.ctl_id;
+	memset(&sc, 0, sizeof(sc)));
 	sc.sc_len = sizeof(sc);
 	sc.sc_family = AF_SYSTEM;
 	sc.ss_sysaddr = AF_SYS_CONTROL;
+	sc.sc_id = ci.ctl_id;
 	sc.sc_unit = unit_num + 1;		/* zero means unspecified */
 	if (connect(fd, (struct sockaddr *)&sc, sizeof(sc)) == -1) {
 		LERR("connect(AF_SYS_CONTROL): %s", strerror(errno));

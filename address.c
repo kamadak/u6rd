@@ -40,10 +40,10 @@
 int
 reject_v4(const struct in_addr *addr4)
 {
-	const char *p;
+	const unsigned char *p;
 	uint32_t a;
 
-	p = (const char *)addr4;
+	p = (const unsigned char *)addr4;
 	a = ntohl(addr4->s_addr);
 
 	if (p[0] == 0 || p[0] == 127)
