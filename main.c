@@ -100,6 +100,7 @@ static void usage(void);
 static void version(void);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixarg);
+static int parse_len(const char *str, int min, int max, const char *name);
 static int parse_relay(struct sockaddr_in *relay, const char *relayarg);
 static int ifconfig(const char *devarg);
 static int open_raw(struct in_addr *v4me, const char *v4mearg);
@@ -184,11 +185,10 @@ main(int argc, char *argv[])
 		exit(1);
 
 	if (options.commonlen != NULL)
-		con.v4commonlen = atoi(options.commonlen);	/* XXX */
-	if (con.v4commonlen < 0 || con.v4commonlen > 31) {
-		LERR("common prefix length of IPv4 out of range");
+		con.v4commonlen = parse_len(options.commonlen, 0, 31,
+		    "common prefix length of IPv4");
+	if (con.v4commonlen == -1)
 		exit(1);
-	}
 	if (con.v6prefixlen + (32 - con.v4commonlen) > 64) {
 		LERR("site prefix length is longer than 64");
 		exit(1);
@@ -270,17 +270,34 @@ parse_prefix(struct in6_addr *prefix, int *prefixlen,
 		return -1;
 	}
 
-	*prefixlen = atoi(p);		/* XXX overflow */
 	/*
 	 * FP + TLA uses 16 bits.  The maximum prefix length in RFC 5569
 	 * is 32 [RFC5569 3], but it is said that some ISPs use longer
 	 * prefixes.
 	 */
-	if (*prefixlen < 16 || *prefixlen > 63) {
-		LERR("prefixlen must be between 16 and 63");
+	*prefixlen = parse_len(p, 16, 63, "prefixlen");
+	if (*prefixlen == -1)
+		return -1;
+	return 0;
+}
+
+static int
+parse_len(const char *str, int min, int max, const char *name)
+{
+	char *endptr;
+	long num;
+
+	errno = 0;
+	num = strtol(str, &endptr, 10);
+	if (str[0] == '\0' || *endptr != '\0') {
+		LERR("%s: %s not a number", str, name);
 		return -1;
 	}
-	return 0;
+	if (errno == ERANGE || num < min || num > max) {
+		LERR("%s: %s out of range", str, name);
+		return -1;
+	}
+	return num;
 }
 
 static int
