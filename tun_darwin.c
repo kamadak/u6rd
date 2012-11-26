@@ -30,21 +30,26 @@
 #include <sys/kern_control.h>
 #include <sys/socket.h>
 #include <sys/sys_domain.h>
+#include <arpa/inet.h>
 #include <net/if_utun.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
 
+#include "var.h"
 #include "util.h"
 #include "tun_if.h"
+
+#define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 
 int
 open_tun(const char *devarg)
 {
 	struct sockaddr_ctl sc;
-	struct ctl_info info;
+	struct ctl_info ci;
 	unsigned int unit_num;
 	int fd;
 
@@ -54,9 +59,9 @@ open_tun(const char *devarg)
 		return -1;
 	}
 
-	memset(&info, 0, sizeof(info));
-	if (strlcpy(info.ctl_name, UTUN_CONTROL_NAME, sizeof(info.ctl_name)) >=
-	    sizeof(info.ctl_name)) {
+	memset(&ci, 0, sizeof(ci));
+	if (strlcpy(ci.ctl_name, UTUN_CONTROL_NAME, sizeof(ci.ctl_name)) >=
+	    sizeof(ci.ctl_name)) {
 		LERR("UTUN_CONTROL_NAME too long");
 		return -1;
 	}
@@ -64,15 +69,16 @@ open_tun(const char *devarg)
 		LERR("socket(SYSPROTO_CONTROL): %s", strerror(errno));
 		return -1;
 	}
-	if (ioctl(fd, CTLIOCGINFO, &info) == -1) {
+	if (ioctl(fd, CTLIOCGINFO, &ci) == -1) {
 		LERR("ioctl(CTLIOCGINFO): %s", strerror(errno));
 		close(fd);
 		return -1;
 	}
-	sc.sc_id = info.ctl_id;
+	memset(&sc, 0, sizeof(sc)));
 	sc.sc_len = sizeof(sc);
 	sc.sc_family = AF_SYSTEM;
 	sc.ss_sysaddr = AF_SYS_CONTROL;
+	sc.sc_id = ci.ctl_id;
 	sc.sc_unit = unit_num + 1;		/* zero means unspecified */
 	if (connect(fd, (struct sockaddr *)&sc, sizeof(sc)) == -1) {
 		LERR("connect(AF_SYS_CONTROL): %s", strerror(errno));
@@ -80,4 +86,31 @@ open_tun(const char *devarg)
 		return -1;
 	}
 	return fd;
+}
+
+size_t
+check_tun_header(const char *buf, size_t len)
+{
+	unsigned long family;
+
+	if (len < TUN_HEAD_LEN) {
+		LDEBUG("tun: no address family");
+		return -1;
+	}
+	if ((family = ntohl(*(const uint32_t *)buf)) != AF_INET6) {
+		LDEBUG("tun: non-IPv6 packet (%lu)", family);
+		return -1;
+	}
+	return TUN_HEAD_LEN;
+}
+
+size_t
+add_tun_header(char *buf, size_t space)
+{
+	if (space < TUN_HEAD_LEN) {
+		LDEBUG("tun: no space for address family");
+		return -1;
+	}
+	*(uint32_t *)(buf - TUN_HEAD_LEN) = htonl(AF_INET6);
+	return TUN_HEAD_LEN;
 }

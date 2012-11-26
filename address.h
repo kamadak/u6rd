@@ -25,6 +25,14 @@
  * SUCH DAMAGE.
  */
 
-int open_tun(const char *devarg);
-size_t check_tun_header(const char *buf, size_t len);
-size_t add_tun_header(char *buf, size_t space);
+int reject_v4(const struct in_addr *addr4);
+int reject_v6(const struct in6_addr *addr6);
+int cmp_v6prefix(const struct in6_addr *prefix,
+    const struct in6_addr *addr6, int bits);
+void extract_v4(struct in_addr *addr4,
+    const struct in_addr *v4me, int v4commonlen,
+    const struct in6_addr *addr6, int v6prefixlen);
+void embed_v4(struct in6_addr *addr6, int v6prefixlen,
+    const struct in_addr *v4me, int v4commonlen);
+const char *addr42str(const struct in_addr *addr4);
+const char *addr62str(const struct in6_addr *addr6);

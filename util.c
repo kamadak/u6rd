@@ -36,8 +36,6 @@
 #include <syslog.h>
 #include <unistd.h>
 
-#include "compat/compat.h"
-
 #include "pathnames.h"
 #include "util.h"
 
@@ -71,9 +69,8 @@ run_as(const char *user)
 }
 
 int
-make_pidfile(void)
+make_pidfile(const char *myname)
 {
-	const char *myname;
 	size_t len;
 
 	if (pidfile != NULL || pidfile_fd != -1) {
@@ -81,7 +78,6 @@ make_pidfile(void)
 		return -1;
 	}
 
-	myname = getprogname();
 	len = strlen(PIDFILE_DIR) + 1 + strlen(myname) + 4 + 1;
 	if ((pidfile = (char *)malloc(len)) == NULL) {
 		LERR("out of memory");

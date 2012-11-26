@@ -24,7 +24,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd April 12, 2012
+.Dd November 26, 2012
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
@@ -133,7 +133,7 @@ Example parameters in this section:
 Note that, converting from IPv4 decimal to IPv6 colon hexadecimal notation,
 198.51.100.1 and 203.0.113.1 correspond to
 c633:6401 and cb00:7101 respectively.
-.Ss FreeBSD 9.0
+.Ss FreeBSD 9.0 (configuring manually)
 .Bd -literal
 # ifconfig tun0 create
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
@@ -147,6 +147,18 @@ after the owning process exits.
 When you restart
 .Nm ,
 remember to reconfigure the address.
+.Ss FreeBSD 9.0 (configuring at start up)
+.Pa /etc/rc.conf
+.Bd -literal -offset indent -compact
+cloned_interfaces="tun0"
+ifconfig_tun0_ipv6="inet6 2001:db8:cb00:7101::1/32 -nud"
+ipv6_defaultrouter="2001:db8:c633:6401::1"
+.Ed
+.Pa /etc/start_if.tun0
+.Bd -literal -offset indent -compact
+/usr/local/sbin/u6rd -u nobody tun0 2001:db8::/32 \e
+        198.51.100.1 203.0.113.1
+.Ed
 .Ss NetBSD 5.1
 .Bd -literal
 # ifconfig tun0 create
@@ -165,7 +177,7 @@ Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
 .Ed
 .Pp
 The utun device, instead of tun, is used on Mac OS X.
-A utun interface is created by the daemon (cannot created with ifconfig),
+A utun interface is created by the daemon (cannot be created with ifconfig),
 so the interface address and the default route
 need to be configured after executing the daemon.
 .\" ----------------------------------------------------------------
@@ -180,6 +192,13 @@ need to be configured after executing the daemon.
 .%T Connection of IPv6 Domains via IPv4 Clouds
 .%R RFC 3056
 .%D February 2001
+.Re
+.Rs
+.%A P. Savola
+.%A C. Patel
+.%T Security Considerations for 6to4
+.%R RFC 3964
+.%D December 2004
 .Re
 .Rs
 .%A R. Despres
