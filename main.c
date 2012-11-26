@@ -585,6 +585,11 @@ tun2raw(struct connection *c)
 		dst = &c->relay;
 	}
 
+	/*
+	 * SO_BROADCAST is disabled by default [SUSv4, System Inferfaces,
+	 * 2.10.16 Use of Options], so no need to check broadcast addresses.
+	 */
+
 	if (sendto(c->fd_raw, buf, len, 0,
 	    (struct sockaddr *)dst, sizeof(*dst)) == -1) {
 		LERR("sendto: raw: %s", strerror(errno));
