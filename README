@@ -14,8 +14,7 @@ Platforms
    The 6rd daemon requires the raw socket and IPv4 support for the
    tun(4) interface.
 
-   FreeBSD
-   NetBSD
+   Supported operating systems are FreeBSD and NetBSD.
 
 Installation
 ------------
@@ -31,6 +30,8 @@ References
 ----------
    [RFC3056] B. Carpenter and K. Moore, "Connection of IPv6 Domains via IPv4
              Clouds", RFC 3056, February 2001.
+   [RFC3964] P. Savola and C. Patel, "Security Considerations for 6to4",
+             RFC 3964, December 2004.
    [RFC5569] R. Despres, "IPv6 Rapid Deployment on IPv4 Infrastructures
              (6rd)", RFC 5569, January 2010.
 

@@ -194,6 +194,13 @@ need to be configured after executing the daemon.
 .%D February 2001
 .Re
 .Rs
+.%A P. Savola
+.%A C. Patel
+.%T Security Considerations for 6to4
+.%R RFC 3964
+.%D December 2004
+.Re
+.Rs
 .%A R. Despres
 .%T "IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)"
 .%R RFC 5569
