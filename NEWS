@@ -1,5 +1,7 @@
 $Id$
 
+1.4 (2012-11-26)
+
    - Prefix lengths given in the command line are parsed more strictly.
 
 1.3 (2012-04-12)
