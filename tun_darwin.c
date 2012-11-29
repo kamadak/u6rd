@@ -74,7 +74,7 @@ open_tun(const char *devarg)
 		close(fd);
 		return -1;
 	}
-	memset(&sc, 0, sizeof(sc)));
+	memset(&sc, 0, sizeof(sc));
 	sc.sc_len = sizeof(sc);
 	sc.sc_family = AF_SYSTEM;
 	sc.ss_sysaddr = AF_SYS_CONTROL;
