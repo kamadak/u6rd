@@ -2,6 +2,8 @@ $Id$
 
 current
 
+1.5 (2013-01-12)
+
    - Fixed a compilation error on Mac OS X (broken in version 1.4).
      No update is needed for other operating systems.
 
