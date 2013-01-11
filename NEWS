@@ -1,5 +1,8 @@
 $Id$
 
+   - Fixed a compilation error on Mac OS X (broken in version 1.4).
+     No update is needed for other operating systems.
+
 1.4 (2012-11-26)
 
    - Prefix lengths given in the command line are parsed more strictly.
