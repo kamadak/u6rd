@@ -369,7 +369,7 @@ static int
 open_raw(struct in_addr *v4me, const char *v4mearg)
 {
 	struct addrinfo hints, *res0;
-	int fd, gairet;
+	int fd, gairet, on;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -391,6 +391,13 @@ open_raw(struct in_addr *v4me, const char *v4mearg)
 	if ((fd = socket(PF_INET, SOCK_RAW, IPPROTO_IPV6)) == -1) {
 		LERR("socket: %s", strerror(errno));
 		freeaddrinfo(res0);
+		return -1;
+	}
+	on = 1;
+	if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &on, sizeof(on)) == -1) {
+		LERR("setsockopt(IP_HDRINCL): %s", strerror(errno));
+		freeaddrinfo(res0);
+		close(fd);
 		return -1;
 	}
 	if (bind(fd, res0->ai_addr, res0->ai_addrlen) == -1) {
@@ -518,16 +525,18 @@ tun2raw(struct connection *c)
 {
 	char *buf;
 	struct sockaddr_in direct, *dst;
+	struct ipv4_header *ip4;
 	struct ipv6_header *ip6;
 	const char *reason;
 	size_t len, tun_hlen;
 
-	buf = c->buf;
-	if ((len = read(c->fd_tun, buf, c->size)) == (size_t)-1) {
+	buf = c->buf + sizeof(*ip4);
+	if ((len = read(c->fd_tun, buf, c->size - sizeof(*ip4))) ==
+	    (size_t)-1) {
 		LERR("read: tun: %s", strerror(errno));
 		goto error;
 	}
-	if (len == c->size) {
+	if (len == c->size - sizeof(*ip4)) {
 		LDEBUG("tun2raw: packet too big");
 		goto error;
 	}
@@ -590,7 +599,29 @@ tun2raw(struct connection *c)
 	 * 2.10.16 Use of Options], so no need to check broadcast addresses.
 	 */
 
-	if (sendto(c->fd_raw, buf, len, 0,
+	/*
+	 * Copy the IPv6 Traffic Class field to the IPv4 Type of Service
+	 * field [RFC5969].
+	 * The ip_off and ip_len fields are in host byte order except
+	 * on OpenBSD 2.1 and later (OpenBSD >= 199706) and Linux.
+	 */
+	ip4 = (struct ipv4_header *)(buf - sizeof(*ip4));
+	ip4->ver_hlen = 4 << 4 | sizeof(*ip4) >> 2;
+	ip4->tos = ntohl(ip6->ver_class_label) >> 20 & 0xff;
+#if defined(__OpenBSD__) || defined(__linux__)
+	ip4->len = htons(len + sizeof(*ip4));
+#else
+	ip4->len = len + sizeof(*ip4);
+#endif
+	ip4->id = 0;			/* let the kernel set */
+	ip4->off = 0;
+	ip4->ttl = 255;			/* MAXTTL */
+	ip4->protocol = IPPROTO_IPV6;
+	ip4->cksum = 0;			/* let the kernel set */
+	ip4->src = c->v4me;
+	ip4->dst = dst->sin_addr;
+
+	if (sendto(c->fd_raw, buf - sizeof(*ip4), len + sizeof(*ip4), 0,
 	    (struct sockaddr *)dst, sizeof(*dst)) == -1) {
 		LERR("sendto: raw: %s", strerror(errno));
 		goto error;
@@ -644,7 +675,7 @@ raw2tun(struct connection *c)
 	/*
 	 * Check the IPv4 header length.  Usually 20 octets.
 	 */
-	skip = (ip4->ver_hlen & 0xf) * 4;
+	skip = (ip4->ver_hlen & 0xf) << 2;
 	if (skip < sizeof(*ip4)) {
 		LDEBUG("raw2tun: IPv4 header too short (%zu)", skip);
 		goto error;
