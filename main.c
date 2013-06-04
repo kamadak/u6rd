@@ -122,7 +122,7 @@ int
 main(int argc, char *argv[])
 {
 	struct connection con;
-	char *devarg, *prefixarg, *relayarg, *v4mearg;
+	const char *devarg, *prefixarg, *relayarg, *v4mearg;
 	int c;
 
 	setprogname(argv[0]);
