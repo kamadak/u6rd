@@ -190,7 +190,7 @@ main(int argc, char *argv[])
 	if (con.v4commonlen == -1)
 		exit(1);
 	if (con.v6prefixlen + (32 - con.v4commonlen) > 64) {
-		LERR("site prefix length is longer than 64");
+		LERR("delegated prefix length is longer than 64");
 		exit(1);
 	}
 	embed_v4(&con.v6prefix, con.v6prefixlen, &con.v4me, con.v4commonlen);
