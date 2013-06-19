@@ -2,12 +2,12 @@ $Id$
 
 User-space 6rd (RFC 5569) implementation
 ----------------------------------------
-   u6rd is a user-space 6rd (RFC 5569) implementation, which uses
-   tun(4) and the raw socket interface.
+   The u6rd daemon is a userland implementation of 6rd (RFC 5569) for
+   6rd customer edge routers.  It does not provide the functionality of
+   6rd relay routers.
 
-   It runs on the 6rd border router of a 6rd site that is isolated from
-   the native IPv6 Internet.  In other words, it does not provide the
-   functionality of 6rd "relay" routers.
+   It runs in the user-space using the tun(4) interface and the raw
+   socket interface.
 
 Platforms
 ---------
@@ -34,6 +34,8 @@ References
              RFC 3964, December 2004.
    [RFC5569] R. Despres, "IPv6 Rapid Deployment on IPv4 Infrastructures
              (6rd)", RFC 5569, January 2010.
+   [RFC5969] W. Townsley and O. Troan, "IPv6 Rapid Deployment on IPv4
+             Infrastructures (6rd) -- Protocol Specification", August 2010.
 
 Copyright and License
 ---------------------

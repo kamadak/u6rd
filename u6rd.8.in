@@ -24,7 +24,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd January 12, 2013
+.Dd June 2, 2013
 .Dt U6RD 8
 .Os
 .\" ----------------------------------------------------------------
@@ -43,29 +43,29 @@
 .Ar my_v4_addr
 .\" ----------------------------------------------------------------
 .Sh DESCRIPTION
+The
 .Nm
-is a user-space 6rd (RFC 5569) implementation, which uses
-.Xr tun 4
-and the raw socket interface.
+daemon is a userland implementation of 6rd (RFC 5569)
+for 6rd customer edge routers.
+It does not provide the functionality of 6rd relay routers.
 .Pp
-It runs on the 6rd border router of a 6rd site that is isolated
-from the native IPv6 Internet.
-It does not provide the functionality of 6rd
-.Qq relay
-routers.
+It runs in the user-space using the
+.Xr tun 4
+interface and the raw socket interface.
 .Pp
 The following options are available:
 .Bl -tag -width "-a 012"
 .It Fl d
 Output debug messages to stderr.
 This option is usually combined with
-.Fl F
-so that stderr is not redirected to
+.Fl F ,
+which prevents stderr from being redirected to
 .Pa /dev/null .
 .It Fl F
 Run in the foreground.
+The
 .Nm
-does not detach itself from the terminal and does not become a daemon.
+program does not detach itself from the terminal and does not become a daemon.
 Log messages are output to the stderr in addition to syslog.
 No PID file is created.
 .It Fl h
@@ -105,8 +105,9 @@ See
 .Sx EXAMPLES
 section.
 .Pp
+The
 .Nm
-exits on
+daemon exits on
 .Dv SIGTERM
 or
 .Dv SIGINT .
@@ -130,15 +131,23 @@ Example parameters in this section:
 203.0.113.1
 .El
 .Pp
+Your 6rd delegated prefix is calculated to be 2001:db8:cb00:7101::/64.
 Note that, converting from IPv4 decimal to IPv6 colon hexadecimal notation,
-198.51.100.1 and 203.0.113.1 correspond to
-c633:6401 and cb00:7101 respectively.
+203.0.113.1 corresponds to cb00:7101.
+.Pp
+The IPv6 default route in the following examples (2001:db8::1) was
+chosen semi-arbitrary
+within the 6rd prefix but outside of delegated prefix,
+so that all IPv6 packets are routed into the tun0 interface.
+It could be specified explicitly by the
+.Qq -ifp tun0
+option.
 .Ss FreeBSD 9.0
 .Bd -literal
 # ifconfig tun0 create
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # ifconfig tun0 inet6 -nud
-# route add -inet6 default 2001:db8:c633:6401::1
+# route add -inet6 default 2001:db8::1
 # u6rd -u nobody tun0 2001:db8::/32 198.51.100.1 203.0.113.1
 .Ed
 .Pp
@@ -152,7 +161,7 @@ remember to reconfigure the address.
 .Bd -literal -offset indent -compact
 cloned_interfaces="tun0"
 ifconfig_tun0_ipv6="inet6 2001:db8:cb00:7101::1/32 -nud"
-ipv6_defaultrouter="2001:db8:c633:6401::1"
+ipv6_defaultrouter="2001:db8::1"
 .Ed
 .Pa /etc/start_if.tun0
 .Bd -literal -offset indent -compact
@@ -165,7 +174,7 @@ ipv6_defaultrouter="2001:db8:c633:6401::1"
 # ifconfig tun0 inet6 2001:db8:cb00:7101::1/32
 # ndp -i tun0 -- -nud
 # sysctl -w net.inet6.tcp6.mss_ifmtu=1
-# route add -inet6 default 2001:db8:c633:6401::1
+# route add -inet6 default 2001:db8::1
 # u6rd -u nobody tun0 2001:db8::/32 198.51.100.1 203.0.113.1
 .Ed
 .Pp
@@ -175,13 +184,29 @@ Setting net.inet6.tcp6.mss_ifmtu to 1 is recommended.
 # u6rd -u nobody utun0 2001:db8::/32 198.51.100.1 203.0.113.1
 # ifconfig utun0 inet6 2001:db8:cb00:7101::1/32
 # ndp -i utun0 -- -nud
-# route add -inet6 default 2001:db8:c633:6401::1
+# route add -inet6 default 2001:db8::1
 .Ed
 .Pp
 The utun device, instead of tun, is used on Mac OS X.
 A utun interface is created by the daemon (cannot be created with ifconfig),
 so the interface address and the default route
 need to be configured after executing the daemon.
+.Ss More complex example on FreeBSD
+Parameters are same except that the common prefix length is 8 bits
+in your 6rd addressing domain.
+In this case, the delegated prefix is concatenation of
+the 6rd prefix (32 bits) and
+unique bits of your IPv4 address (32 - 8 = 24 bits),
+so its length is 56 bits.
+.Bd -literal
+# ifconfig tun0 create
+# ifconfig tun0 inet6 2001:db8:71:100::1/32
+# ifconfig tun0 inet6 -nud
+# ifconfig em0 inet6 2001:db8:71:101::1/64
+# route add -inet6 default 2001:db8::1
+# route add -inet6 2001:db8:71:100:: -prefixlen 56 ::1 -reject
+# u6rd -u nobody -r 8 tun0 2001:db8::/32 198.51.100.1 203.0.113.1
+.Ed
 .\" ----------------------------------------------------------------
 .Sh SEE ALSO
 .Xr tun 4 ,
@@ -207,6 +232,13 @@ need to be configured after executing the daemon.
 .%T "IPv6 Rapid Deployment on IPv4 Infrastructures (6rd)"
 .%R RFC 5569
 .%D January 2010
+.Re
+.Rs
+.%A W. Townsley
+.%A O. Troan
+.%T "IPv6 Rapid Deployment on IPv4 Infrastructures (6rd) -- Protocol Specification"
+.%R RFC 5969
+.%D August 2010
 .Re
 .\" ----------------------------------------------------------------
 .Sh AUTHORS

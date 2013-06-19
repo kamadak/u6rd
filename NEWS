@@ -1,5 +1,8 @@
 $Id$
 
+   - The IPv6 Traffic Class field is copied to the IPv4 Type of Service
+     field.
+
 1.5 (2013-01-12)
 
    - Fixed a compilation error on Mac OS X (broken in version 1.4).
