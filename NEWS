@@ -2,6 +2,8 @@ $Id$
 
 current
 
+1.6 (2013-06-19)
+
    - The IPv6 Traffic Class field is copied to the IPv4 Type of Service
      field.
 
