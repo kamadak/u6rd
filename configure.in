@@ -15,17 +15,19 @@ AC_PROG_INSTALL
 dnl Checks for libraries.
 
 dnl Checks for header files.
-AC_CHECK_HEADERS(net/if_tun.h net/if_utun.h net/tun/if_tun.h, break, ac_hdr=)
+AC_CHECK_HEADERS(net/if_tun.h net/if_utun.h net/tun/if_tun.h linux/if_tun.h,
+	break, ac_hdr=)
 case $ac_hdr in
 net/if_tun.h|net/tun/if_tun.h) P_SRCS="$P_SRCS tun_bsd.c" ;;
 net/if_utun.h) P_SRCS="$P_SRCS tun_darwin.c" ;;
+linux/if_tun.h) P_SRCS="$P_SRCS tun_linux.c" ;;
 *) AC_MSG_ERROR([No supported tunneling device.]) ;;
 esac
 
 dnl Checks for typedefs, structures, and compiler characteristics.
 
 dnl Checks for library functions.
-AC_REPLACE_FUNCS(getprogname)
+AC_REPLACE_FUNCS(getprogname strlcpy)
 
 dnl Package options
 if test x"$GCC" = xyes; then

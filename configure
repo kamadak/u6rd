@@ -909,7 +909,7 @@ test -z "$INSTALL_DATA" && INSTALL_DATA='${INSTALL} -m 644'
 
 
 
-for ac_hdr in net/if_tun.h net/if_utun.h net/tun/if_tun.h
+for ac_hdr in net/if_tun.h net/if_utun.h net/tun/if_tun.h linux/if_tun.h
 do
 ac_safe=`echo "$ac_hdr" | sed 'y%./+-%__p_%'`
 echo $ac_n "checking for $ac_hdr""... $ac_c" 1>&6
@@ -953,19 +953,20 @@ done
 case $ac_hdr in
 net/if_tun.h|net/tun/if_tun.h) P_SRCS="$P_SRCS tun_bsd.c" ;;
 net/if_utun.h) P_SRCS="$P_SRCS tun_darwin.c" ;;
+linux/if_tun.h) P_SRCS="$P_SRCS tun_linux.c" ;;
 *) { echo "configure: error: No supported tunneling device." 1>&2; exit 1; } ;;
 esac
 
 
-for ac_func in getprogname
+for ac_func in getprogname strlcpy
 do
 echo $ac_n "checking for $ac_func""... $ac_c" 1>&6
-echo "configure:964: checking for $ac_func" >&5
+echo "configure:965: checking for $ac_func" >&5
 if eval "test \"`echo '$''{'ac_cv_func_$ac_func'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 969 "configure"
+#line 970 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char $ac_func(); below.  */
@@ -988,7 +989,7 @@ $ac_func();
 
 ; return 0; }
 EOF
-if { (eval echo configure:992: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+if { (eval echo configure:993: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
   eval "ac_cv_func_$ac_func=yes"
 else

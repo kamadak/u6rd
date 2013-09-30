@@ -191,6 +191,16 @@ The utun device, instead of tun, is used on Mac OS X.
 A utun interface is created by the daemon (cannot be created with ifconfig),
 so the interface address and the default route
 need to be configured after executing the daemon.
+.\" .Ss Debian GNU/Linux 7.1
+.\" .Bd -literal
+.\" # u6rd -u nobody tun0 2001:db8::/32 198.51.100.1 203.0.113.1
+.\" # ifconfig tun0 inet6 add 2001:db8:cb00:7101::1/32
+.\" # route -A inet6 add default gw 2001:db8:c633:6401::1
+.\" .Ed
+.\" .Pp
+.\" A tun interface is created by the daemon,
+.\" so the interface address and the default route
+.\" need to be configured after executing the daemon.
 .Ss More complex example on FreeBSD
 Parameters are same except that the common prefix length is 8 bits
 in your 6rd addressing domain.

@@ -431,7 +431,9 @@ open_sigxfr(void)
 	(void)sigaction(SIGHUP, &sa, NULL);
 	(void)sigaction(SIGINT, &sa, NULL);
 	(void)sigaction(SIGTERM, &sa, NULL);
+#ifdef SIGINFO
 	(void)sigaction(SIGINFO, &sa, NULL);
+#endif
 	sa.sa_handler = SIG_IGN;
 	(void)sigaction(SIGPIPE, &sa, NULL);
 	return 0;
@@ -507,12 +509,14 @@ read_signal(struct connection *c)
 	case SIGTERM:
 	case SIGINT:
 		return 1;
+#ifdef SIGINFO
 	case SIGINFO:
 		LINFO("Ipkts %lu, Ierrs %lu, Irjct %lu, Ibytes %lu, "
 		    "Opkts %lu, Oerrs %lu, Orjct %lu, Obytes %lu",
 		    c->ipkts, c->ierrs, c->irjct, c->ibytes,
 		    c->opkts, c->oerrs, c->orjct, c->obytes);
 		break;
+#endif
 	default:
 		LERR("unexpected signal %d", signo);
 		break;
