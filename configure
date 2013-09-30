@@ -909,19 +909,21 @@ test -z "$INSTALL_DATA" && INSTALL_DATA='${INSTALL} -m 644'
 
 
 
-ac_safe=`echo "net/if_tun.h" | sed 'y%./+-%__p_%'`
-echo $ac_n "checking for net/if_tun.h""... $ac_c" 1>&6
-echo "configure:915: checking for net/if_tun.h" >&5
+for ac_hdr in net/if_tun.h net/if_utun.h net/tun/if_tun.h
+do
+ac_safe=`echo "$ac_hdr" | sed 'y%./+-%__p_%'`
+echo $ac_n "checking for $ac_hdr""... $ac_c" 1>&6
+echo "configure:917: checking for $ac_hdr" >&5
 if eval "test \"`echo '$''{'ac_cv_header_$ac_safe'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 920 "configure"
+#line 922 "configure"
 #include "confdefs.h"
-#include <net/if_tun.h>
+#include <$ac_hdr>
 EOF
 ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:925: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
+{ (eval echo configure:927: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
 ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
 if test -z "$ac_err"; then
   rm -rf conftest*
@@ -937,56 +939,33 @@ rm -f conftest*
 fi
 if eval "test \"`echo '$ac_cv_header_'$ac_safe`\" = yes"; then
   echo "$ac_t""yes" 1>&6
-  P_SRCS="$P_SRCS tun_bsd.c"
-else
-  echo "$ac_t""no" 1>&6
-ac_safe=`echo "net/if_utun.h" | sed 'y%./+-%__p_%'`
-echo $ac_n "checking for net/if_utun.h""... $ac_c" 1>&6
-echo "configure:946: checking for net/if_utun.h" >&5
-if eval "test \"`echo '$''{'ac_cv_header_$ac_safe'+set}'`\" = set"; then
-  echo $ac_n "(cached) $ac_c" 1>&6
-else
-  cat > conftest.$ac_ext <<EOF
-#line 951 "configure"
-#include "confdefs.h"
-#include <net/if_utun.h>
+    ac_tr_hdr=HAVE_`echo $ac_hdr | sed 'y%abcdefghijklmnopqrstuvwxyz./-%ABCDEFGHIJKLMNOPQRSTUVWXYZ___%'`
+  cat >> confdefs.h <<EOF
+#define $ac_tr_hdr 1
 EOF
-ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:956: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
-ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
-if test -z "$ac_err"; then
-  rm -rf conftest*
-  eval "ac_cv_header_$ac_safe=yes"
-else
-  echo "$ac_err" >&5
-  echo "configure: failed program was:" >&5
-  cat conftest.$ac_ext >&5
-  rm -rf conftest*
-  eval "ac_cv_header_$ac_safe=no"
-fi
-rm -f conftest*
-fi
-if eval "test \"`echo '$ac_cv_header_'$ac_safe`\" = yes"; then
-  echo "$ac_t""yes" 1>&6
-  P_SRCS="$P_SRCS tun_darwin.c"
+ break
 else
   echo "$ac_t""no" 1>&6
-{ echo "configure: error: No supported tunneling device." 1>&2; exit 1; }
+ac_hdr=
 fi
+done
 
-fi
-
+case $ac_hdr in
+net/if_tun.h|net/tun/if_tun.h) P_SRCS="$P_SRCS tun_bsd.c" ;;
+net/if_utun.h) P_SRCS="$P_SRCS tun_darwin.c" ;;
+*) { echo "configure: error: No supported tunneling device." 1>&2; exit 1; } ;;
+esac
 
 
 for ac_func in getprogname
 do
 echo $ac_n "checking for $ac_func""... $ac_c" 1>&6
-echo "configure:985: checking for $ac_func" >&5
+echo "configure:964: checking for $ac_func" >&5
 if eval "test \"`echo '$''{'ac_cv_func_$ac_func'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 990 "configure"
+#line 969 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char $ac_func(); below.  */
@@ -1009,7 +988,7 @@ $ac_func();
 
 ; return 0; }
 EOF
-if { (eval echo configure:1013: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+if { (eval echo configure:992: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
   eval "ac_cv_func_$ac_func=yes"
 else

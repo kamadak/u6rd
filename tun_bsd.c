@@ -29,7 +29,11 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <net/if_tun.h>
+#if defined HAVE_NET_IF_TUN_H
+# include <net/if_tun.h>
+#elif defined HAVE_NET_TUN_IF_TUN_H
+# include <net/tun/if_tun.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
