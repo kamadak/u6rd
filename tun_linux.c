@@ -29,7 +29,6 @@
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 #include <linux/if_tun.h>
-#include <net/ethernet.h>
 #include <net/if.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -81,7 +80,7 @@ check_tun_header(const char *buf, size_t len)
 		return -1;
 	}
 	pi = (const struct tun_pi *)buf;
-	if (pi->proto != htons(ETHERTYPE_IPV6)) {
+	if (pi->proto != htons(ETH_P_IPV6)) {
 		LDEBUG("tun: non-IPv6 packet (%u)", ntohs(pi->proto));
 		return -1;
 	}
@@ -99,6 +98,6 @@ add_tun_header(char *buf, size_t space)
 	}
 	pi = (struct tun_pi *)(buf - sizeof(*pi));
 	pi->flags = 0;
-	pi->proto = htons(ETHERTYPE_IPV6);
+	pi->proto = htons(ETH_P_IPV6);
 	return sizeof(*pi);
 }
