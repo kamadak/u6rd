@@ -26,6 +26,9 @@
  */
 
 #include <sys/types.h>
+#if defined(HAVE_CAPSICUM)
+# include <sys/capability.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -40,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "compat/compat.h"
@@ -122,11 +126,14 @@ int
 main(int argc, char *argv[])
 {
 	struct connection con;
+	struct pidfile *pf;
 	const char *devarg, *prefixarg, *relayarg, *v4mearg;
 	int c;
 
+	pf = NULL;
+
 	setprogname(argv[0]);
-	while ((c = getopt(argc, argv, "dFhr:u:V")) != -1) {
+	while ((c = getopt(argc, argv, "dFhr:s:u:V")) != -1) {
 		switch (c) {
 		case 'd':
 			options.debug++;
@@ -140,6 +147,15 @@ main(int argc, char *argv[])
 		case 'r':
 			options.commonlen = optarg;
 			break;
+		case 's':
+#if defined(HAVE_CAPSICUM)
+			if (strcmp(optarg, "capsicum") == 0) {
+				options.capsicum = 1;
+				break;
+			}
+#endif
+			usage();
+			/* NOTREACHED */
 		case 'u':
 			options.user = optarg;
 			break;
@@ -160,7 +176,12 @@ main(int argc, char *argv[])
 	relayarg = argv[2];
 	v4mearg = argv[3];
 
-	openlog(NULL, LOG_PERROR, LOG_DAEMON);
+	/*
+	 * Load /etc/localtime and open the syslog connection (LOG_NDELAY)
+	 * before entering capability mode.
+	 */
+	tzset();
+	openlog(NULL, LOG_PERROR | LOG_NDELAY, LOG_DAEMON);
 	if (options.debug == 0)
 		setlogmask(LOG_UPTO(LOG_INFO));
 
@@ -195,24 +216,44 @@ main(int argc, char *argv[])
 	}
 	embed_v4(&con.v6prefix, con.v6prefixlen, &con.v4me, con.v4commonlen);
 
-	if (!options.foreground && make_pidfile(getprogname()) == -1)
+	if (!options.foreground && (pf = make_pidfile(getprogname())) == NULL)
 		exit(1);
 	if (options.user != NULL && run_as(options.user) == -1) {
-		cleanup_pidfile();
+		cleanup_pidfile(pf);
 		exit(1);
 	}
 	if (!options.foreground) {
 		if (daemon(0, 0) == -1) {
 			LERR("daemon: %s", strerror(errno));
-			cleanup_pidfile();
+			cleanup_pidfile(pf);
 			exit(1);
 		}
 		openlog(NULL, 0, LOG_DAEMON);
 	}
-	if (!options.foreground && write_pidfile() == -1) {
-		cleanup_pidfile();
+	if (!options.foreground && write_pidfile(pf) == -1) {
+		cleanup_pidfile(pf);
 		exit(1);
 	}
+
+#if defined(HAVE_CAPSICUM)
+	if (options.capsicum) {
+		if (cap_enter() == -1) {
+			LERR("cap_enter: %s", strerror(errno));
+			exit(1);
+		}
+		if (cap_rights_limit(con.fd_tun,
+		    CAP_POLL_EVENT | CAP_READ | CAP_WRITE) == -1 ||
+		    cap_rights_limit(con.fd_raw,
+		    CAP_POLL_EVENT | CAP_READ | CAP_WRITE) == -1 ||
+		    cap_rights_limit(pf->fd,
+		    CAP_FSTAT | CAP_FTRUNCATE) == -1 ||
+		    cap_rights_limit(pf->dirfd,
+		    CAP_LOOKUP | CAP_FSTATAT | CAP_UNLINKAT) == -1) {
+			LERR("cap_rights_limit: %s", strerror(errno));
+			exit(1);
+		}
+	}
+#endif
 
 	LNOTICE(PROGVERSION " started");
 	if (loop(&con) == -1) {
@@ -220,14 +261,18 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 	LNOTICE(PROGVERSION " exiting");
-	cleanup_pidfile();
+	cleanup_pidfile(pf);
 	exit(0);
 }
 
 static void
 usage(void)
 {
-	printf("usage: %s [-dFhV] [-r v4_common_len] [-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
+	printf("usage: %s [-dFhV] [-r v4_common_len] "
+#if defined(HAVE_CAPSICUM)
+	    "[-s capsicum] "
+#endif
+	    "[-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
 	exit(1);
 }

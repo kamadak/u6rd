@@ -37,7 +37,14 @@
 
 #define lengthof(array)		(sizeof(array) / sizeof((array)[0]))
 
+struct pidfile {
+	int fd;
+	int dirfd;
+	const char *name;
+	char path[];
+};
+
 int run_as(const char *user);
-int make_pidfile(const char *myname);
-int write_pidfile(void);
-void cleanup_pidfile(void);
+struct pidfile *make_pidfile(const char *myname);
+int write_pidfile(struct pidfile *pf);
+void cleanup_pidfile(struct pidfile *pf);

@@ -27,6 +27,9 @@ esac
 dnl Checks for typedefs, structures, and compiler characteristics.
 
 dnl Checks for library functions.
+dnl cap_rights_limit() in FreeBSD 10 replaced cap_new() in FreeBSD 9.
+AC_CHECK_HEADER(sys/capability.h, AC_CHECK_FUNC(cap_rights_limit,
+ AC_DEFINE(HAVE_CAPSICUM)))
 AC_REPLACE_FUNCS(getprogname strlcpy)
 
 dnl Package options

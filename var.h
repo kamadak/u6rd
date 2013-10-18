@@ -26,6 +26,7 @@
  */
 
 struct options {
+	int capsicum;
 	const char *commonlen;
 	int debug;
 	int foreground;
