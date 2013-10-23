@@ -102,6 +102,7 @@ struct connection {
 
 static void usage(void);
 static void version(void);
+static int setup_capsicum(struct connection *c, struct pidfile *pf);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixarg);
 static int parse_len(const char *str, int min, int max, const char *name);
@@ -235,25 +236,8 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-#if defined(HAVE_CAPSICUM)
-	if (options.capsicum) {
-		if (cap_enter() == -1) {
-			LERR("cap_enter: %s", strerror(errno));
-			exit(1);
-		}
-		if (cap_rights_limit(con.fd_tun,
-		    CAP_POLL_EVENT | CAP_READ | CAP_WRITE) == -1 ||
-		    cap_rights_limit(con.fd_raw,
-		    CAP_POLL_EVENT | CAP_READ | CAP_WRITE) == -1 ||
-		    cap_rights_limit(pf->fd,
-		    CAP_FSTAT | CAP_FTRUNCATE) == -1 ||
-		    cap_rights_limit(pf->dirfd,
-		    CAP_LOOKUP | CAP_FSTATAT | CAP_UNLINKAT) == -1) {
-			LERR("cap_rights_limit: %s", strerror(errno));
-			exit(1);
-		}
-	}
-#endif
+	if (options.capsicum && setup_capsicum(&con, pf) == -1)
+		exit(1);
 
 	LNOTICE(PROGVERSION " started");
 	if (loop(&con) == -1) {
@@ -282,6 +266,33 @@ version(void)
 {
 	printf(PROGVERSION "\n");
 	exit(1);
+}
+
+static int
+setup_capsicum(struct connection *c, struct pidfile *pf)
+{
+#if defined(HAVE_CAPSICUM)
+	cap_rights_t r_net, r_pff, r_pfd;
+
+	if (cap_enter() == -1) {
+		LERR("cap_enter: %s", strerror(errno));
+		return -1;
+	}
+	cap_rights_init(&r_net, CAP_POLL_EVENT, CAP_READ, CAP_WRITE);
+	cap_rights_init(&r_pff, CAP_FSTAT, CAP_FTRUNCATE);
+	cap_rights_init(&r_pfd, CAP_LOOKUP, CAP_FSTATAT, CAP_UNLINKAT);
+	if (cap_rights_limit(c->fd_tun, &r_net) == -1 ||
+	    cap_rights_limit(c->fd_raw, &r_net) == -1 ||
+	    cap_rights_limit(pf->fd, &r_pff) == -1 ||
+	    cap_rights_limit(pf->dirfd, &r_pfd) == -1) {
+		LERR("cap_rights_limit: %s", strerror(errno));
+		return -1;
+	}
+	return 0;
+#else
+	(void)c, (void)pf;
+	return 0;
+#endif
 }
 
 static int
