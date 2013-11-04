@@ -105,7 +105,7 @@ make_pidfile(const char *myname)
 		lose_pidfile(pf);
 		return NULL;
 	}
-#undef OPEN_MODE
+#undef OPEN_FLAGS
 
 	return pf;
 }
