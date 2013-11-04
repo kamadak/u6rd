@@ -82,7 +82,7 @@ make_pidfile(const char *myname)
 	snprintf(pf->path, pathlen, "%s/%s.pid", PIDFILE_DIR, myname);
 	pf->name = pf->path + dirlen + 1;
 
-#if defined(HAVE_CAPSICUM)
+#if defined(ENABLE_CAPSICUM)
 	if ((pf->dirfd = open(PIDFILE_DIR, O_DIRECTORY)) == -1) {
 		LERR("open: %s: %s", PIDFILE_DIR, strerror(errno));
 		lose_pidfile(pf);
@@ -155,7 +155,7 @@ cleanup_pidfile(struct pidfile *pf)
 	/* NB: race between stat() and unlink() */
 	if (fstat(pf->fd, &sb1) == -1)
 		LERR("fstat PID file failed: %s", strerror(errno));
-#if HAVE_CAPSICUM
+#if defined(ENABLE_CAPSICUM)
 	else if (fstatat(pf->dirfd, pf->name, &sb2, 0) == -1)
 		LERR("%s: fstatat: %s", pf->path, strerror(errno));
 #else
@@ -166,7 +166,7 @@ cleanup_pidfile(struct pidfile *pf)
 		LERR("PID file is replaced; exiting without unlinking it");
 	else {
 		/* If root priv has been dropped, unlink will fail. */
-#if HAVE_CAPSICUM
+#if defined(ENABLE_CAPSICUM)
 		if (unlinkat(pf->dirfd, pf->name, 0) == -1 &&
 		    ftruncate(pf->fd, 0) == -1)
 			LERR("%s: ftruncate: %s", pf->path, strerror(errno));

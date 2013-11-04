@@ -26,7 +26,7 @@
  */
 
 #include <sys/types.h>
-#if defined(HAVE_CAPSICUM)
+#if defined(ENABLE_CAPSICUM)
 # include <sys/capability.h>
 #endif
 #include <sys/ioctl.h>
@@ -149,7 +149,7 @@ main(int argc, char *argv[])
 			options.commonlen = optarg;
 			break;
 		case 's':
-#if defined(HAVE_CAPSICUM)
+#if defined(ENABLE_CAPSICUM)
 			if (strcmp(optarg, "capsicum") == 0) {
 				options.capsicum = 1;
 				break;
@@ -253,7 +253,7 @@ static void
 usage(void)
 {
 	printf("usage: %s [-dFhV] [-r v4_common_len] "
-#if defined(HAVE_CAPSICUM)
+#if defined(ENABLE_CAPSICUM)
 	    "[-s capsicum] "
 #endif
 	    "[-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
@@ -271,7 +271,7 @@ version(void)
 static int
 setup_capsicum(struct connection *c, struct pidfile *pf)
 {
-#if defined(HAVE_CAPSICUM)
+#if defined(ENABLE_CAPSICUM)
 	cap_rights_t r_net, r_pff, r_pfd;
 
 	if (cap_enter() == -1) {
