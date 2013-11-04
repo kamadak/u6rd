@@ -48,15 +48,15 @@ reject_v4(const struct in_addr *addr4)
 
 	if (p[0] == 0 || p[0] == 127)
 		return 1;		/* self-identification, loopback */
-	if ((a & 0xf0000000) == 0xe0000000)
+	if ((a & 0xf0000000U) == 0xe0000000U)
 		return 1;		/* multicast */
-	if ((a & 0xff000000) == 0x0a000000 ||
-	    (a & 0xfff00000) == 0xac100000 ||
-	    (a & 0xffff0000) == 0xc0a80000)
+	if ((a & 0xff000000U) == 0x0a000000U ||
+	    (a & 0xfff00000U) == 0xac100000U ||
+	    (a & 0xffff0000U) == 0xc0a80000U)
 		return 1;		/* private */
-	if ((a & 0xffff0000) == 0xa9fe0000)
+	if ((a & 0xffff0000U) == 0xa9fe0000U)
 		return 1;		/* link-local */
-	if (a == 0xffffffff)
+	if (a == 0xffffffffU)
 		return 1;		/* limited broadcast */
 	return 0;
 }
@@ -94,7 +94,7 @@ cmp_v6prefix(const struct in6_addr *prefix,
 			return 1;
 	if (bits == 0)
 		return 0;
-	return (*p1 ^ *p2) & (0xff00 >> bits);
+	return (*p1 ^ *p2) & (0xff00U >> bits);
 }
 
 void
@@ -106,7 +106,7 @@ extract_v4(struct in_addr *addr4,
 	uint32_t a4, a6;
 
 	/* Common prefix. */
-	a4 = ntohl(v4me->s_addr) & ~(0xffffffff >> v4commonlen);
+	a4 = ntohl(v4me->s_addr) & ~(0xffffffffU >> v4commonlen);
 
 	/* Embedded part. */
 	p = (const uint32_t *)addr6;
@@ -129,7 +129,7 @@ embed_v4(struct in6_addr *addr6, int v6prefixlen,
 
 	/* Discard the common prefix. */
 	a4 = ntohl(v4me->s_addr) << v4commonlen;
-	a4mask = 0xffffffff << v4commonlen;
+	a4mask = 0xffffffffU << v4commonlen;
 
 	/* Embed into the IPv6 address. */
 	p = (uint32_t *)addr6;
