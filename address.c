@@ -162,7 +162,7 @@ const char *
 addr62str(const struct in6_addr *addr6)
 {
 	static char cyclicbuf[2][INET6_ADDRSTRLEN];
-	static int idx;
+	static size_t idx;
 	char *buf;
 
 	buf = cyclicbuf[idx = (idx + 1) % lengthof(cyclicbuf)];
