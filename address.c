@@ -93,7 +93,7 @@ cmp_v6prefix(const struct in6_addr *prefix,
 		if (*p1++ != *p2++)
 			return 1;
 	if (bits == 0)
-		return 0;
+		return 0;		/* Not to access *p1 and *p2. */
 	return (*p1 ^ *p2) & (0xff00U >> bits);
 }
 
