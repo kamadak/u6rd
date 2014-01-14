@@ -70,16 +70,23 @@ make_pidfile(const char *myname)
 {
 	struct pidfile *pf;
 	size_t dirlen, pathlen;
+	int ret;
 
 	dirlen = strlen(PIDFILE_DIR);
 	pathlen = dirlen + 1 + strlen(myname) + 4 + 1;
-	if ((pf = (struct pidfile *)malloc(sizeof(*pf) + pathlen)) == NULL) {
+	if (sizeof(*pf) + pathlen < sizeof(*pf) ||
+	    (pf = (struct pidfile *)malloc(sizeof(*pf) + pathlen)) == NULL) {
 		LERR("out of memory");
 		return NULL;
 	}
 	pf->fd = -1;
 	pf->dirfd = -1;
-	snprintf(pf->path, pathlen, "%s/%s.pid", PIDFILE_DIR, myname);
+	ret = snprintf(pf->path, pathlen, "%s/%s.pid", PIDFILE_DIR, myname);
+	if (ret < 0 || (size_t)ret >= pathlen) {
+		LERR("too long PID file path");
+		lose_pidfile(pf);
+		return NULL;
+	}
 	pf->name = pf->path + dirlen + 1;
 
 #if defined(ENABLE_CAPSICUM)
@@ -115,6 +122,7 @@ write_pidfile(struct pidfile *pf)
 {
 	char pidstr[16];
 	pid_t pid;
+	int ret;
 
 #ifndef O_EXLOCK
 	/* .l_start and .l_len are 0 to lock the entire file. */
@@ -132,7 +140,11 @@ write_pidfile(struct pidfile *pf)
 		return -1;
 	}
 	pid = getpid();
-	snprintf(pidstr, sizeof(pidstr), "%d\n", (int)pid);
+	ret = snprintf(pidstr, sizeof(pidstr), "%d\n", (int)pid);
+	if (ret < 0 || (size_t)ret >= sizeof(pidstr)) {
+		LERR("too large PID");
+		return -1;
+	}
 	if (write(pf->fd, pidstr, strlen(pidstr)) == -1) {
 		LERR("%s: write: %s", pf->path, strerror(errno));
 		return -1;
