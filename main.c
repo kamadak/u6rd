@@ -26,6 +26,9 @@
  */
 
 #include <sys/types.h>
+#if defined(ENABLE_CAPSICUM)
+# include <sys/capability.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -40,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "compat/compat.h"
@@ -98,6 +102,7 @@ struct connection {
 
 static void usage(void);
 static void version(void);
+static int setup_capsicum(struct connection *c, struct pidfile *pf);
 static int parse_prefix(struct in6_addr *prefix, int *prefixlen,
     const char *prefixarg);
 static int parse_len(const char *str, int min, int max, const char *name);
@@ -122,11 +127,14 @@ int
 main(int argc, char *argv[])
 {
 	struct connection con;
+	struct pidfile *pf;
 	const char *devarg, *prefixarg, *relayarg, *v4mearg;
 	int c;
 
+	pf = NULL;
+
 	setprogname(argv[0]);
-	while ((c = getopt(argc, argv, "dFhr:u:V")) != -1) {
+	while ((c = getopt(argc, argv, "dFhr:s:u:V")) != -1) {
 		switch (c) {
 		case 'd':
 			options.debug++;
@@ -140,6 +148,15 @@ main(int argc, char *argv[])
 		case 'r':
 			options.commonlen = optarg;
 			break;
+		case 's':
+#if defined(ENABLE_CAPSICUM)
+			if (strcmp(optarg, "capsicum") == 0) {
+				options.capsicum = 1;
+				break;
+			}
+#endif
+			usage();
+			/* NOTREACHED */
 		case 'u':
 			options.user = optarg;
 			break;
@@ -160,7 +177,12 @@ main(int argc, char *argv[])
 	relayarg = argv[2];
 	v4mearg = argv[3];
 
-	openlog(NULL, LOG_PERROR, LOG_DAEMON);
+	/*
+	 * Load /etc/localtime and open the syslog connection (LOG_NDELAY)
+	 * before entering capability mode.
+	 */
+	tzset();
+	openlog(NULL, LOG_PERROR | LOG_NDELAY, LOG_DAEMON);
 	if (options.debug == 0)
 		setlogmask(LOG_UPTO(LOG_INFO));
 
@@ -195,24 +217,27 @@ main(int argc, char *argv[])
 	}
 	embed_v4(&con.v6prefix, con.v6prefixlen, &con.v4me, con.v4commonlen);
 
-	if (!options.foreground && make_pidfile(getprogname()) == -1)
+	if (!options.foreground && (pf = make_pidfile(getprogname())) == NULL)
 		exit(1);
 	if (options.user != NULL && run_as(options.user) == -1) {
-		cleanup_pidfile();
+		cleanup_pidfile(pf);
 		exit(1);
 	}
 	if (!options.foreground) {
 		if (daemon(0, 0) == -1) {
 			LERR("daemon: %s", strerror(errno));
-			cleanup_pidfile();
+			cleanup_pidfile(pf);
 			exit(1);
 		}
 		openlog(NULL, 0, LOG_DAEMON);
 	}
-	if (!options.foreground && write_pidfile() == -1) {
-		cleanup_pidfile();
+	if (!options.foreground && write_pidfile(pf) == -1) {
+		cleanup_pidfile(pf);
 		exit(1);
 	}
+
+	if (options.capsicum && setup_capsicum(&con, pf) == -1)
+		exit(1);
 
 	LNOTICE(PROGVERSION " started");
 	if (loop(&con) == -1) {
@@ -220,14 +245,18 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 	LNOTICE(PROGVERSION " exiting");
-	cleanup_pidfile();
+	cleanup_pidfile(pf);
 	exit(0);
 }
 
 static void
 usage(void)
 {
-	printf("usage: %s [-dFhV] [-r v4_common_len] [-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
+	printf("usage: %s [-dFhV] [-r v4_common_len] "
+#if defined(ENABLE_CAPSICUM)
+	    "[-s capsicum] "
+#endif
+	    "[-u user] tunN prefix/prefixlen relay_v4_addr my_v4_addr\n",
 	    getprogname());
 	exit(1);
 }
@@ -237,6 +266,33 @@ version(void)
 {
 	printf(PROGVERSION "\n");
 	exit(1);
+}
+
+static int
+setup_capsicum(struct connection *c, struct pidfile *pf)
+{
+#if defined(ENABLE_CAPSICUM)
+	cap_rights_t r_net, r_pff, r_pfd;
+
+	if (cap_enter() == -1) {
+		LERR("cap_enter: %s", strerror(errno));
+		return -1;
+	}
+	cap_rights_init(&r_net, CAP_POLL_EVENT, CAP_READ, CAP_WRITE);
+	cap_rights_init(&r_pff, CAP_FSTAT, CAP_FTRUNCATE);
+	cap_rights_init(&r_pfd, CAP_LOOKUP, CAP_FSTATAT, CAP_UNLINKAT);
+	if (cap_rights_limit(c->fd_tun, &r_net) == -1 ||
+	    cap_rights_limit(c->fd_raw, &r_net) == -1 ||
+	    cap_rights_limit(pf->fd, &r_pff) == -1 ||
+	    cap_rights_limit(pf->dirfd, &r_pfd) == -1) {
+		LERR("cap_rights_limit: %s", strerror(errno));
+		return -1;
+	}
+	return 0;
+#else
+	(void)c, (void)pf;
+	return 0;
+#endif
 }
 
 static int
@@ -431,7 +487,9 @@ open_sigxfr(void)
 	(void)sigaction(SIGHUP, &sa, NULL);
 	(void)sigaction(SIGINT, &sa, NULL);
 	(void)sigaction(SIGTERM, &sa, NULL);
+#ifdef SIGINFO
 	(void)sigaction(SIGINFO, &sa, NULL);
+#endif
 	sa.sa_handler = SIG_IGN;
 	(void)sigaction(SIGPIPE, &sa, NULL);
 	return 0;
@@ -507,12 +565,14 @@ read_signal(struct connection *c)
 	case SIGTERM:
 	case SIGINT:
 		return 1;
+#ifdef SIGINFO
 	case SIGINFO:
 		LINFO("Ipkts %lu, Ierrs %lu, Irjct %lu, Ibytes %lu, "
 		    "Opkts %lu, Oerrs %lu, Orjct %lu, Obytes %lu",
 		    c->ipkts, c->ierrs, c->irjct, c->ibytes,
 		    c->opkts, c->oerrs, c->orjct, c->obytes);
 		break;
+#endif
 	default:
 		LERR("unexpected signal %d", signo);
 		break;

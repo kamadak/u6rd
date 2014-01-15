@@ -27,85 +27,77 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <arpa/inet.h>
-#if defined HAVE_NET_IF_TUN_H
-# include <net/if_tun.h>
-#elif defined HAVE_NET_TUN_IF_TUN_H
-# include <net/tun/if_tun.h>
-#endif
+#include <linux/if_tun.h>
+#include <net/if.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
 
+#include "compat/compat.h"
+
 #include "var.h"
-#include "pathnames.h"
 #include "util.h"
 #include "tun_if.h"
-
-#define TUN_HEAD_LEN	4		/* TUNSIFHEAD */
 
 int
 open_tun(const char *devarg)
 {
-	char devpath[32];
-	size_t len;
-	int fd, on;
+	struct ifreq ifr;
+	int fd;
 
-	on = 1;
-
-	len = snprintf(devpath, sizeof(devpath), "%s/%s", DEV_DIR, devarg);
-	if (len >= sizeof(devpath)) {
-		LERR("%s: device pathname too long", devarg);
+	if ((fd = open("/dev/net/tun", O_RDWR)) == -1) {
+		LERR("open: /dev/net/tun: %s", strerror(errno));
 		return -1;
 	}
-	if ((fd = open(devpath, O_RDWR, 0)) == -1) {
-		LERR("open: %s: %s", devpath, strerror(errno));
-		return -1;
-	}
-#if !defined(__OpenBSD__)
-	/*
-	 * Requied to receive non-IPv4 packets on FreeBSD and NetBSD.
-	 * If IFHEAD is set, protocol family (4 bytes) is prepended
-	 * to each packet.  OpenBSD does the same thing from the beginning,
-	 * so there is no flag.
-	 */
-	if (ioctl(fd, TUNSIFHEAD, &on) == -1) {
-		LERR("ioctl(TUNSIFHEAD): %s: %s", devpath, strerror(errno));
+
+	memset(&ifr, 0, sizeof(ifr));
+	ifr.ifr_flags = IFF_TUN;
+	if (strlcpy(ifr.ifr_name, devarg, sizeof(ifr.ifr_name)) >=
+	    sizeof(ifr.ifr_name)) {
+		LERR("%s: interface name too long", devarg);
 		close(fd);
 		return -1;
 	}
-#endif
+	if (ioctl(fd, TUNSETIFF, &ifr) == -1) {
+		LERR("ioctl(TUNSETIFF): %s", strerror(errno));
+		close(fd);
+		return -1;
+	}
 	return fd;
 }
 
 size_t
 check_tun_header(const char *buf, size_t len)
 {
-	unsigned long family;
+	const struct tun_pi *pi;
 
-	if (len < TUN_HEAD_LEN) {
+	if (len < sizeof(*pi)) {
 		LDEBUG("tun: no address family");
 		return -1;
 	}
-	if ((family = ntohl(*(const uint32_t *)buf)) != AF_INET6) {
-		LDEBUG("tun: non-IPv6 packet (%lu)", family);
+	pi = (const struct tun_pi *)buf;
+	if (pi->proto != htons(ETH_P_IPV6)) {
+		LDEBUG("tun: non-IPv6 packet (%u)", ntohs(pi->proto));
 		return -1;
 	}
-	return TUN_HEAD_LEN;
+	return sizeof(*pi);
 }
 
 size_t
 add_tun_header(char *buf, size_t space)
 {
-	if (space < TUN_HEAD_LEN) {
+	struct tun_pi *pi;
+
+	if (space < sizeof(*pi)) {
 		LDEBUG("tun: no space for address family");
 		return -1;
 	}
-	*(uint32_t *)(buf - TUN_HEAD_LEN) = htonl(AF_INET6);
-	return TUN_HEAD_LEN;
+	pi = (struct tun_pi *)(buf - sizeof(*pi));
+	pi->flags = 0;
+	pi->proto = htons(ETH_P_IPV6);
+	return sizeof(*pi);
 }

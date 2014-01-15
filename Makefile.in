@@ -38,6 +38,8 @@ u6rd.8: u6rd.8.in
 
 getprogname.o: compat/getprogname.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $?
+strlcpy.o: compat/strlcpy.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $?
 
 install: all
 	$(INSTALL) -d $(Dsbindir)
