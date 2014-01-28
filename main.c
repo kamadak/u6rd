@@ -278,7 +278,8 @@ setup_capsicum(struct connection *c, struct pidfile *pf)
 		LERR("cap_enter: %s", strerror(errno));
 		return -1;
 	}
-	cap_rights_init(&r_net, CAP_POLL_EVENT, CAP_READ, CAP_WRITE);
+	cap_rights_init(&r_net, CAP_CONNECT, CAP_POLL_EVENT,
+	    CAP_READ, CAP_WRITE);
 	cap_rights_init(&r_pff, CAP_FSTAT, CAP_FTRUNCATE);
 	cap_rights_init(&r_pfd, CAP_LOOKUP, CAP_FSTATAT, CAP_UNLINKAT);
 	if (cap_rights_limit(c->fd_tun, &r_net) == -1 ||
