@@ -1,5 +1,8 @@
 $Id$
 
+   - Drop Capsicum configure option so that users do not enable it
+     by mistake.  The current u6rd does not work with Capsicum.
+
 1.7 (2014-01-19)
 
    - Support for Capsicum capability framework.
