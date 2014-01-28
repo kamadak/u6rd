@@ -2,6 +2,8 @@ $Id$
 
 current
 
+1.7.1 (2014-01-28)
+
    - Drop Capsicum configure option so that users do not enable it
      by mistake.  The current u6rd does not work with Capsicum.
 
