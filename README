@@ -7,7 +7,8 @@ User-space 6rd (RFC 5569) implementation
    6rd relay routers.
 
    It runs in the user-space using the tun(4) interface and the raw
-   socket interface.
+   socket interface.  This means that u6rd is not tightly coupled with
+   the kernel and it will run on various operating systems and versions.
 
 Platforms
 ---------

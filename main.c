@@ -637,7 +637,7 @@ tun2raw(struct connection *c)
 	 * router directly.  Otherwise, send it to the relay router.
 	 */
 	if (cmp_v6prefix(&c->v6prefix, &ip6->dst, c->v6prefixlen) == 0) {
-		/* Send to the direct peer. */
+		/* Send it to the direct peer. */
 		direct = c->relay;
 		extract_v4(&direct.sin_addr, &c->v4me, c->v4commonlen,
 		    &ip6->dst, c->v6prefixlen);
@@ -647,7 +647,7 @@ tun2raw(struct connection *c)
 		}
 		dst = &direct;
 	} else {
-		/* Send to the relay. */
+		/* Send it to the relay. */
 		if (reject_v6(&ip6->dst)) {
 			reason = "reject IPv6 destination";
 			goto reject;
