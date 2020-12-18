@@ -2,6 +2,8 @@ $Id$
 
 current
 
+   - FreeBSD 11.0 and later have been supported.
+
 1.7.1 (2014-01-28)
 
    - Drop Capsicum configure option so that users do not enable it

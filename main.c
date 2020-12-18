@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #if defined(ENABLE_CAPSICUM)
 # include <sys/capability.h>
 #endif
@@ -663,13 +663,21 @@ tun2raw(struct connection *c)
 	/*
 	 * Copy the IPv6 Traffic Class field to the IPv4 Type of Service
 	 * field [RFC5969].
-	 * The ip_off and ip_len fields are in host byte order except
-	 * on OpenBSD 2.1 and later (OpenBSD >= 199706) and Linux.
+	 */
+	/*
+	 * The ip_off and ip_len fields are in host byte order on
+	 * traditional BSDs.  They were changed to network byte order in
+	 * OpenBSD 2.1 (OpenBSD >= 199706) [1] and
+	 * FreeBSD 11.0 (__FreeBSD_version >= 1100030) [2, 3].
+	 * [1] https://cvsweb.openbsd.org/cgi-bin/cvsweb/src/sys/netinet/raw_ip.c.diff?r1=1.8&r2=1.9 (1997-01-30)
+	 * [2] https://svnweb.freebsd.org/base?view=revision&revision=270929 (2014-09-01)
+	 * [3] https://wiki.freebsd.org/SOCK_RAW
 	 */
 	ip4 = (struct ipv4_header *)(buf - sizeof(*ip4));
 	ip4->ver_hlen = 4 << 4 | sizeof(*ip4) >> 2;
 	ip4->tos = ntohl(ip6->ver_class_label) >> 20 & 0xff;
-#if defined(__OpenBSD__) || defined(__linux__)
+#if (defined(__FreeBSD__) && __FreeBSD_version >= 1100030) || \
+    defined(__OpenBSD__) || defined(__linux__)
 	ip4->len = htons(len + sizeof(*ip4));
 #else
 	ip4->len = len + sizeof(*ip4);
